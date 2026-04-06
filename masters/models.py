@@ -45,4 +45,4 @@ class AdvBanner(models.Model):
     image = models.ImageField(upload_to='advbanners/')  # images will go to media/banners/
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)  # timestamp for creation
-    updated_at = models.DateTimeField(auto_now=True)      # timestamp for updates
+    updated_at = models.DateTimeField(auto_now=True)      # timestamp for updatesjdjhj
