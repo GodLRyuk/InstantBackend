@@ -32,6 +32,7 @@ class AdminLoginAPIView(APIView):
             'access': str(refresh.access_token),
             'user_id': user.id,
             'email': user.email,
+            'zip_code': user.zip_code,
             'is_staff': user.is_staff
         })
 class CustomerLoginAPIView(APIView):
@@ -56,6 +57,9 @@ class CustomerLoginAPIView(APIView):
             "access": str(refresh.access_token),
             "user_id": user.id,
             "email": user.email,
+            'phone': user.phone,
+            'address': user.address,
+            'zip_code': user.zip_code,
             "role": user.role
         })
 
@@ -70,6 +74,7 @@ class RegisterAPIView(APIView):
         password = request.data.get("password")
         phone = request.data.get("phone")
         address = request.data.get("address")
+        zip_code = request.data.get("zip_code")
         role = request.data.get("role", "CUSTOMER")
 
         if not username or not email or not password or not phone:
@@ -92,6 +97,7 @@ class RegisterAPIView(APIView):
                 password=password,
                 phone=phone,
                 address=address,
+                zip_code=zip_code,
                 role=role,
                 is_staff=True
             )
@@ -102,6 +108,7 @@ class RegisterAPIView(APIView):
                 password=password,
                 phone=phone,
                 address=address,
+                zip_code=zip_code,
                 role=role
             )
 

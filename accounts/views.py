@@ -4,11 +4,11 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import get_user_model
 
 class AdminLoginAPIView(APIView):
 
     def post(self, request):
-
         email = request.data.get('email')
         password = request.data.get('password')
 
@@ -53,6 +53,8 @@ class AdminLoginAPIView(APIView):
             'access': str(refresh.access_token),
             'user_id': user.id,
             'email': user.email,
+            'phone': user.phone,
+            'address': user.address,
             'is_staff': user.is_staff
         })
         
@@ -61,12 +63,13 @@ class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-
+        User = get_user_model() 
         username = request.data.get("username")
         email = request.data.get("email")
         password = request.data.get("password")
         phone = request.data.get("phone")
         address = request.data.get("address")
+        zip_code = request.data.get("zip_code")
         role = request.data.get("role", "CUSTOMER")
 
         if not username or not email or not password or not phone:
@@ -93,6 +96,7 @@ class RegisterAPIView(APIView):
             password=password,
             phone=phone,
             address=address,
+            zip_code=zip_code
             role=role
         )
 

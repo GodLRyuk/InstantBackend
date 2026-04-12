@@ -24,11 +24,12 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/masters/', include('masters.urls')),
     path('api/products/', include('products.urls')),
-    path('cart/', include('cart.urls')),
+    path('api/cart/', include('cart.urls')),
     path('api/', include('orders.urls')),
     path('api/accounts/', include('accounts.api.urls')),
     path('api/stock/', include('stock.api.urls')),
     path('api/token/refresh/', TokenRefreshView.as_view()),
+    path('api/addresses/', include('addresses.urls')),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

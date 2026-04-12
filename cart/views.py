@@ -34,11 +34,12 @@ class AddToCartView(APIView):
         if not created:
             new_quantity = cart_item.quantity + quantity
 
-            if new_quantity > inventory.available_stock():
-                return Response(
-                    {"error": "Stock limit exceeded"},
-                    status=400
-                )
+            old_quantity = cart_item.quantity if not created else 0
+
+            available_stock = inventory.available_stock() + old_quantity
+
+            if new_quantity > available_stock:
+                return Response({"error": "Stock limit exceeded"}, status=400)
 
             cart_item.quantity = new_quantity
         else:
@@ -56,20 +57,25 @@ class ViewCartView(APIView):
 
     def get(self, request):
         cart = Cart.objects.get(user=request.user)
-        items = cart.items.all()
+        items = cart.items.all().order_by('product_id')
 
         data = []
         total = 0
 
         for item in items:
-            price = item.product.discounted_price()
+            product = item.product 
+            inventory = product.inventory
+            price = product.discounted_price()
             item_total = price * item.quantity
 
             data.append({
-                "product": item.product.name,
+                "product_id": item.product_id,
+                "product": product.name,
                 "quantity": item.quantity,
                 "price": price,
-                "total": item_total
+                "total": item_total,
+                "available_stock": inventory.available_stock(),
+                "image": request.build_absolute_uri(product.image.url) if product.image else None
             })
 
             total += item_total
@@ -85,12 +91,80 @@ class RemoveFromCartView(APIView):
         user = request.user
         product_id = request.data.get("product_id")
 
+        if not product_id:
+            return Response({"error": "Product ID required"}, status=400)
+
         try:
-            cart_item = CartItem.objects.get(cart__user=user, product_id=product_id)
+            cart_item = CartItem.objects.get(
+                cart__user=user,
+                product_id=product_id
+            )
         except CartItem.DoesNotExist:
-            return Response({"error": "Item not in cart"}, status=400)
+            return Response({"error": "Item not in cart"}, status=404)
 
-        # Remove and update inventory
-        cart_item.remove()
+        product = cart_item.product
 
-        return Response({"message": "Item removed from cart"})
+        # ✅ SAFE inventory access
+        try:
+            inventory = product.inventory
+        except:
+            return Response({
+                "error": "Inventory not found for this product"
+            }, status=500)
+
+        # ✅ update reserved stock
+        inventory.reserved_stock -= cart_item.quantity
+
+        # safety check
+        if inventory.reserved_stock < 0:
+            inventory.reserved_stock = 0
+
+        inventory.save()
+
+        # ✅ delete cart item
+        cart_item.delete()
+
+        return Response({
+            "success": True,
+            "message": "Item removed from cart",
+            "available_stock": inventory.available_stock()
+        })
+class UpdateCartQuantityView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        product_id = request.data.get("product_id")
+        quantity = int(request.data.get("quantity", 1))
+
+        if quantity < 1:
+            return Response({"error": "Quantity must be at least 1"}, status=400)
+
+        try:
+            cart_item = CartItem.objects.get(
+                cart__user=user,
+                product_id=product_id
+            )
+        except CartItem.DoesNotExist:
+            return Response({"error": "Item not found"}, status=404)
+
+        product = cart_item.product
+        inventory = product.inventory
+
+        old_qty = cart_item.quantity
+        available_stock = inventory.available_stock() + old_qty
+
+        if quantity > available_stock:
+            return Response({"error": "Stock limit exceeded"}, status=400)
+
+        # ✅ adjust reserved stock
+        inventory.reserved_stock = inventory.reserved_stock - old_qty + quantity
+        inventory.save()
+
+        cart_item.quantity = quantity
+        cart_item.save()
+
+        return Response({
+            "success": True,
+            "message": "Cart updated"
+        })

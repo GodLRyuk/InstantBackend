@@ -27,24 +27,46 @@ def new_arrivals(request):
 @api_view(['GET'])
 def recommended_products(request):
     user = request.user
+
+    purchased_products = OrderItem.objects.filter(
+        order__user=user
+    ).values_list('product', flat=True)
+
+    cart_products = CartItem.objects.filter(
+        cart__user=user
+    ).values_list('product', flat=True)
+
+    all_products = list(purchased_products) + list(cart_products)
+
     recommended = Product.objects.none()
 
-    purchased_products = OrderItem.objects.filter(order__user=user).values_list('product', flat=True)
+    if all_products:
+        categories = Product.objects.filter(
+            id__in=all_products
+        ).values_list('category', flat=True)
 
-    if purchased_products.exists():
-        categories = Product.objects.filter(id__in=purchased_products).values_list('category', flat=True)
-        recommended = Product.objects.filter(category__in=categories, is_active=True).exclude(id__in=purchased_products).distinct()[:10]
+        if categories:
+            recommended = Product.objects.filter(
+                category__in=categories,
+                is_active=True
+            ).exclude(
+                id__in=all_products
+            ).distinct()[:10]
 
-    elif CartItem.objects.filter(cart__user=user).exists():
-        cart_products = CartItem.objects.filter(cart__user=user).values_list('product', flat=True)
-        categories = Product.objects.filter(id__in=cart_products).values_list('category', flat=True)
-        recommended = Product.objects.filter(category__in=categories, is_active=True).exclude(id__in=cart_products).distinct()[:10]
+    # ✅ Fallback if empty
+    if not recommended.exists():
+        recommended = Product.objects.filter(
+            is_active=True
+        ).exclude(
+            id__in=all_products
+        ).order_by('?')[:10]
 
-    else:
-        all_active = Product.objects.filter(is_active=True)
-        recommended = random.sample(list(all_active), min(10, all_active.count()))
+    serializer = ProductListSerializer(
+        recommended,
+        many=True,
+        context={'request': request}
+    )
 
-    serializer = ProductListSerializer(recommended, many=True, context={'request': request})
     return Response(serializer.data)
 @api_view(['GET'])
 def products_by_category(request, category_id):
