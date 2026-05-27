@@ -5,7 +5,7 @@ from rest_framework import status
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
-
+User = get_user_model()
 class AdminLoginAPIView(APIView):
 
     def post(self, request):
@@ -104,3 +104,20 @@ class RegisterAPIView(APIView):
             "message": "User registered successfully",
             "user_id": user.id
         }, status=status.HTTP_201_CREATED)
+class UserProfileAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        data = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "phone": user.phone,
+            "address": user.address,
+            "zip_code": user.zip_code,
+            "role": user.role,
+        }
+
+        return Response(data, status=status.HTTP_200_OK)

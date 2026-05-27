@@ -6,7 +6,8 @@ from .views import (
     ProductDeleteAPIView,
     new_arrivals,
     recommended_products,
-    products_by_category
+    products_by_category,
+    ProductSearchAPIView
 )
 
 urlpatterns = [
@@ -14,7 +15,7 @@ urlpatterns = [
     path('product/list/', ProductListAPIView.as_view()),
     path('product/update/<int:pk>/', ProductUpdateAPIView.as_view()),
     path('product/delete/<int:pk>/', ProductDeleteAPIView.as_view()),
-
+    path("search/", ProductSearchAPIView.as_view()),
     path('new-arrivals/', new_arrivals),
     path('recommended/', recommended_products),
 ]

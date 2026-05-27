@@ -138,23 +138,19 @@ class DeleteStockAPIView(APIView):
             status=status.HTTP_200_OK
         )
 class InventoryListAPIView(APIView):
-    """
-    List inventory data per product
-    """
-    permission_classes = [IsAuthenticated]
-
     def get(self, request):
-        # Get all inventories
         inventories = Inventory.objects.select_related('product').all()
 
-        data = []
-        for inv in inventories:
-            data.append({
+        return Response([
+            {
                 "product_id": inv.product.id,
                 "product_name": inv.product.name,
                 "total_stock": inv.total_stock,
-                "price": inv.product.price,
-                "unit": inv.product.unit.name if inv.product.unit else None,  # optional
-            })
-
-        return Response(data, status=status.HTTP_200_OK)
+                "reserved_stock": inv.reserved_stock,
+                "available_stock": inv.total_stock - inv.reserved_stock,
+                "low_stock_threshold": inv.low_stock_threshold,
+                "is_low_stock": inv.total_stock <= inv.low_stock_threshold,
+                "updated_at": inv.updated_at,
+            }
+            for inv in inventories
+        ])

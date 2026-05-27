@@ -30,6 +30,8 @@ urlpatterns = [
     path('api/stock/', include('stock.api.urls')),
     path('api/token/refresh/', TokenRefreshView.as_view()),
     path('api/addresses/', include('addresses.urls')),
+    path('api/', include('reviews.urls')),
+    path('api/orders/', include('orders.urls')),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

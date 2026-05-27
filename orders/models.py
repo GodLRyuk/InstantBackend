@@ -3,12 +3,17 @@ from django.utils import timezone
 from products.models import Product
 from accounts.models import User
 from promotions.models import Coupon
+from addresses.models import Address
 
 
 class Order(models.Model):
     # Coupon & discount
     coupon = models.ForeignKey(Coupon, on_delete=models.SET_NULL, null=True, blank=True)
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    razorpay_order_id = models.CharField(max_length=255, null=True, blank=True)
+    razorpay_payment_id = models.CharField(max_length=255, null=True, blank=True)
+    razorpay_signature = models.TextField(null=True, blank=True)
+    payment_method = models.CharField(max_length=20, default="RAZORPAY")
 
     # Payment status
     PAYMENT_STATUS_CHOICES = [
@@ -43,7 +48,7 @@ class Order(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    address_snapshot = models.JSONField(null=True, blank=True)
     # ---------------------- PAYMENT STATUS METHODS ----------------------
 
     def mark_paid(self):
@@ -107,3 +112,21 @@ class OrderItem(models.Model):
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
     def __str__(self):
         return f"{self.product.name} x {self.quantity}"
+
+class DeliveryAssignment(models.Model):
+    order = models.ForeignKey("Order", on_delete=models.CASCADE)
+    driver = models.ForeignKey(User, on_delete=models.CASCADE)
+
+    STATUS_CHOICES = (
+        ("ASSIGNED", "Assigned"),
+        ("PICKED_UP", "Picked Up"),
+        ("OUT_FOR_DELIVERY", "Out for Delivery"),
+        ("DELIVERED", "Delivered"),
+    )
+
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="ASSIGNED")
+
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.order_id} -> {self.driver_id}"

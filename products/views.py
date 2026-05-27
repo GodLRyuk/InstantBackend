@@ -8,10 +8,26 @@ from orders.models import OrderItem
 from cart.models import CartItem
 import random
 from decimal import Decimal
+from django.db.models import Q
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.filter(is_active=True)
     serializer_class = ProductSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = self.request.query_params.get('search')
+
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(brand__name__icontains=search) |
+                Q(category__name__icontains=search) |
+                Q(subcategory__name__icontains=search) |
+                Q(description__icontains=search)
+            ).distinct()
+
+        return queryset
 
 @api_view(['GET'])
 def new_arrivals(request):

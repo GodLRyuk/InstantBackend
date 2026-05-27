@@ -7,6 +7,6 @@ from .serializers import StockBatchSerializer
 class StockListAPIView(APIView):
 
     def get(self, request):
-        stocks = StockBatch.objects.all().order_by('-id')
+        stocks = Inventory.objects.all().order_by('-id')
         serializer = StockBatchSerializer(stocks, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)

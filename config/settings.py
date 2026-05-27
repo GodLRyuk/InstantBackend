@@ -33,14 +33,17 @@ ALLOWED_HOSTS = ["*"]
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',                 
     'corsheaders', 
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    'django.contrib.staticfiles',
+    'django.contrib.staticfiles',     
     'rest_framework',
+    'channels',                         
+    'django_extensions',
     'accounts',
     'masters',
     'products',
@@ -49,9 +52,10 @@ INSTALLED_APPS = [
     'stock',
     'promotions',
     'addresses',
+    'reviews',
 ]
 AUTH_USER_MODEL = 'accounts.User'
-
+ASGI_APPLICATION = 'config.asgi.application'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -115,7 +119,14 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
-
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],  # your redis server
+        },
+    },
+}
 
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
@@ -148,3 +159,14 @@ SIMPLE_JWT = {
 CORS_ALLOW_ALL_ORIGINS = True
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+
+EMAIL_HOST_USER = 'sylmondal@gmail.com'
+EMAIL_HOST_PASSWORD = 'vbne owyn ifim mtvv'
+
+# Razorpay ✅ add these
+RAZORPAY_KEY_ID = 'rzp_test_StsVgck8iNAA8a'
+RAZORPAY_SECRET = '2950kn0jDNssYM656rGoJAt3'

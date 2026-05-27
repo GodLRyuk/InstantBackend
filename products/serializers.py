@@ -2,6 +2,8 @@ from rest_framework import serializers
 from .models import Product
 from stock.models import Inventory
 from decimal import Decimal
+from reviews.serializers import ProductReviewSerializer
+
 
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
@@ -12,6 +14,10 @@ class ProductSerializer(serializers.ModelSerializer):
     discounted_price = serializers.SerializerMethodField()
     stock = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
+    reviews = ProductReviewSerializer(many=True, read_only=True)
+
+    average_rating = serializers.SerializerMethodField()
+    review_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -25,7 +31,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "stock",
             "image", "image_url",
             "description",
-            "is_active", "created_at"
+            "is_active", "created_at","reviews","average_rating","review_count"
         ]
     def get_discounted_price(self, obj):
         return float(obj.discounted_price())
@@ -53,6 +59,14 @@ class ProductSerializer(serializers.ModelSerializer):
         if obj.unit and obj.unit_size:
             return f"{obj.unit_size} {obj.unit.name}"
         return None
+    def get_average_rating(self, obj):
+        reviews = obj.reviews.all()
+        if reviews.exists():
+            return round(sum(r.rating for r in reviews) / reviews.count(), 1)
+        return 0
+
+    def get_review_count(self, obj):
+        return obj.reviews.count()
 
 class ProductListSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)

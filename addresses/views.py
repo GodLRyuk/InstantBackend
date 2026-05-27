@@ -16,6 +16,8 @@ class AddAddressAPIView(APIView):
         address = Address.objects.create(
             user=user,
             full_address=request.data.get("full_address"),
+            name=request.data.get("name"),
+            phone=request.data.get("phone"),
             city=request.data.get("city"),
             state=request.data.get("state"),
             pincode=request.data.get("pincode"),
@@ -36,6 +38,8 @@ class AddAddressAPIView(APIView):
         address = Address.objects.create(
             user=user,
             full_address=request.data.get("full_address"),
+            name=request.data.get("name"),
+            phone=request.data.get("phone"),
             city=request.data.get("city"),
             state=request.data.get("state"),
             pincode=request.data.get("pincode"),
@@ -61,6 +65,8 @@ class ListAddressAPIView(APIView):
             data.append({
                 "id": a.id,
                 "full_address": a.full_address,
+                "name": a.name,
+                "phone": a.phone,
                 "city": a.city,
                 "state": a.state,
                 "pincode": a.pincode,

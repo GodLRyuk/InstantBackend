@@ -5,6 +5,7 @@ from rest_framework import status
 from products.models import Product
 from masters.models import Category, SubCategory, Brand, Unit
 from stock.models import Inventory
+from django.db.models import Q
 
 
 class ProductCreateAPIView(APIView):
@@ -68,22 +69,22 @@ class ProductListAPIView(APIView):
 
         for product in products:
             data.append({
-                "id": product.id,
-                "name": product.name,
-                "category": product.category.name,
-                "subcategory": product.subcategory.name,
-                "brand": product.brand.name if product.brand else None,
-                "unit_id": product.unit.id if product.unit else None,
-                "unit_name": product.unit.name if product.unit else None,
-                "unit_size": product.unit_size, 
-                "price": str(product.price),
-                "discount_percent": str(product.discount_percent),
-                "final_price": str(product.discounted_price()),
-                "description": product.description
-                "stock": product.stock
-                "image": product.image.url if product.image else None,
-                "is_active": product.is_active
-            })
+            "id": product.id,
+            "name": product.name,
+            "category": product.category.name,
+            "subcategory": product.subcategory.name,
+            "brand": product.brand.name if product.brand else None,
+            "unit_id": product.unit.id if product.unit else None,
+            "unit_name": product.unit.name if product.unit else None,
+            "unit_size": product.unit_size,
+            "price": str(product.price),
+            "discount_percent": str(product.discount_percent),
+            "final_price": str(product.discounted_price()),
+            "description": product.description,   # ✅ comma added
+            "stock": product.stock,               # ✅ comma added
+            "image": product.image.url if product.image else None,
+            "is_active": product.is_active
+        })
 
         return Response(data)
 class ProductUpdateAPIView(APIView):
@@ -130,3 +131,37 @@ class ProductDeleteAPIView(APIView):
         product.delete()
 
         return Response({"message": "Product deleted successfully"})
+class ProductSearchAPIView(APIView):
+
+    def get(self, request):
+        query = request.query_params.get("search", "").strip()
+
+        if not query:
+            return Response({"error": "Search query is required"}, status=400)
+
+        products = Product.objects.filter(
+            Q(name__icontains=query) |
+            Q(brand__name__icontains=query) |
+            Q(category__name__icontains=query) |
+            Q(subcategory__name__icontains=query) |
+            Q(description__icontains=query)
+        ).distinct()
+
+        data = [{
+            "id": p.id,
+            "name": p.name,
+            "category": p.category.name,
+            "subcategory": p.subcategory.name,
+            "brand": p.brand.name if p.brand else None,
+            "unit_name": p.unit.name if p.unit else None,
+            "price": str(p.price),
+            "final_price": str(p.discounted_price()),
+            "image": p.image.url if p.image else None,
+            "description": p.description,
+            "is_active": p.is_active,
+        } for p in products]
+
+        return Response({
+            "count": products.count(),
+            "results": data
+        })

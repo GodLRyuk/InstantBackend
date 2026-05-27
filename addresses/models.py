@@ -16,6 +16,8 @@ class Address(models.Model):
     )
 
     full_address = models.TextField()
+    name = models.CharField(max_length=100, blank=True, null=True)
+    phone = models.CharField(max_length=15, unique=True, null=True, blank=True)
     city = models.CharField(max_length=100, blank=True, null=True)
     state = models.CharField(max_length=100, blank=True, null=True)
     pincode = models.CharField(max_length=10, blank=True, null=True)
