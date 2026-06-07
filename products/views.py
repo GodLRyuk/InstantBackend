@@ -1,6 +1,6 @@
 from rest_framework import viewsets
-from .models import Product
-from .serializers import ProductSerializer
+from .models import Bundle, FlashSale, Product
+from .serializers import BundleSerializer, ProductSerializer
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .serializers import ProductListSerializer
@@ -9,6 +9,7 @@ from cart.models import CartItem
 import random
 from decimal import Decimal
 from django.db.models import Q
+from django.utils import timezone
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.filter(is_active=True)
@@ -91,4 +92,39 @@ def products_by_category(request, category_id):
     """
     products = Product.objects.filter(category_id=category_id, is_active=True)
     serializer = ProductListSerializer(products, many=True, context={'request': request})
+    return Response(serializer.data)
+
+@api_view(['GET'])
+def flash_sale_products(request):
+    flash_sale = FlashSale.objects.filter(
+        is_active=True,
+        start_time__lte=timezone.now(),
+        end_time__gte=timezone.now()
+    ).first()
+
+    if not flash_sale:
+        return Response({'flash_sale': None, 'products': []})
+
+    products = flash_sale.products.filter(  # ← products linked to this sale
+        is_active=True,
+        discount_percent__gt=0
+    ).select_related(
+        'category', 'subcategory', 'brand', 'unit'
+    ).prefetch_related(
+        'inventory'
+    ).order_by('-discount_percent')[:10]
+
+    serializer = ProductListSerializer(products, many=True, context={'request': request})
+
+    return Response({
+        'flash_sale': {
+            'title': flash_sale.title,
+            'end_time': flash_sale.end_time,
+        },
+        'products': serializer.data
+    })
+@api_view(['GET'])
+def bundle_offers(request):
+    bundles = Bundle.objects.filter(is_active=True)
+    serializer = BundleSerializer(bundles, many=True, context={'request': request})
     return Response(serializer.data)

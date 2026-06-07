@@ -19,3 +19,9 @@ staticfiles/
 # IDE
 .vscode/
 .idea/
+venv/
+__pycache__/
+*.pyc
+.env
+media/
+staticfiles/

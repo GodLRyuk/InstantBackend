@@ -14,7 +14,7 @@ from .views import (
     DriverLoginAPIView,
     DriverOrderDetailAPIView,
 )
-from accounts.api.driver_views import DriverStatusAPIView
+from accounts.api.driver_views import DriverStatusAPIView,DriverAttendanceAPIView
 
 
 urlpatterns = [
@@ -31,5 +31,6 @@ urlpatterns = [
     path('driver/login/', DriverLoginAPIView.as_view(), name='driver-login'),
     path('driver/status/', DriverStatusAPIView.as_view()),
     path("driver/order/<int:order_id>/", DriverOrderDetailAPIView.as_view()),
+    path('driver/attendance/', DriverAttendanceAPIView.as_view()),
 
 ]

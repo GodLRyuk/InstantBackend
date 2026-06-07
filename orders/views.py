@@ -11,11 +11,12 @@ import hmac
 import hashlib
 from django.conf import settings
 from orders.models import Order, DeliveryAssignment
-from orders.services.driver_assignment import assign_driver
+from orders.services.driver_assignment import User, assign_driver
 from django.core.cache import cache
 from django.core.mail import send_mail
 import random
 from orders.utils import notify_driver
+from promotions.models import Coupon, CouponUsage
 
 class OrderListView(ListAPIView):
     serializer_class = OrderSerializer
@@ -109,7 +110,6 @@ class CreateOrderView(CreateAPIView):
             order_id = data.get('order_id') or data.get('id')
             order = Order.objects.get(id=order_id)
 
-            # Check not already assigned
             existing = DeliveryAssignment.objects.filter(order=order).first()
             if not existing:
                 driver = assign_driver(order)
@@ -133,7 +133,17 @@ class CreateOrderView(CreateAPIView):
                     print(f'📤 Auto assigned driver {driver.id} to order {order.id}')
         except Exception as e:
             print(f'⚠️ Auto assign failed: {e}')
-            # Don't fail the order creation if assignment fails
+
+        # ✅ Record coupon usage if a one-time coupon was applied
+        try:
+            coupon_code = request.data.get("coupon_code", "").strip().upper()
+            if coupon_code:
+                coupon = Coupon.objects.get(code=coupon_code, one_time_per_user=True)
+                CouponUsage.objects.get_or_create(coupon=coupon, user=request.user)
+        except Coupon.DoesNotExist:
+            pass  # Not a one-time coupon, nothing to record
+        except Exception as e:
+            print(f'⚠️ Coupon usage recording failed: {e}')
 
         return Response(data, status=201)
 

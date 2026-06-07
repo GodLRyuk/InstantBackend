@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils import timezone
+from django.conf import settings
 
 
 class Coupon(models.Model):
@@ -14,6 +15,7 @@ class Coupon(models.Model):
     min_order_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     active = models.BooleanField(default=True)
     expires_at = models.DateTimeField(null=True, blank=True)
+    one_time_per_user = models.BooleanField(default=False)
 
     def is_valid(self):
         """Check if coupon is active and not expired"""
@@ -33,3 +35,10 @@ class Coupon(models.Model):
 
     def __str__(self):
         return self.code
+class CouponUsage(models.Model):
+    coupon = models.ForeignKey(Coupon, on_delete=models.CASCADE, related_name='usages')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    used_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('coupon', 'user')  # prevents duplicate entries

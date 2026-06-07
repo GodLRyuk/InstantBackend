@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Product
+from .models import Bundle, Product
 from stock.models import Inventory
 from decimal import Decimal
 from reviews.serializers import ProductReviewSerializer
@@ -38,9 +38,8 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_stock(self, obj):
         try:
-            inventory = Inventory.objects.get(product=obj)
-            return inventory.total_stock
-        except Inventory.DoesNotExist:
+            return obj.inventory.total_stock
+        except Exception:
             return 0
 
     def get_image(self, obj):
@@ -106,9 +105,8 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     def get_stock(self, obj):
         try:
-            inventory = Inventory.objects.get(product=obj)
-            return inventory.total_stock
-        except Inventory.DoesNotExist:
+            return obj.inventory.total_stock
+        except Exception:
             return 0
 
     def get_image(self, obj):
@@ -119,4 +117,45 @@ class ProductListSerializer(serializers.ModelSerializer):
     def get_unit_display(self, obj):
         if obj.unit and obj.unit_size:
             return f"{obj.unit_size} {obj.unit.name}"
+        return None
+    
+class BundleProductSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = ['id', 'name', 'price', 'image_url']
+
+    def get_image_url(self, obj):
+        request = self.context.get('request')
+        if obj.image and hasattr(obj.image, 'url'):
+            return request.build_absolute_uri(obj.image.url) if request else obj.image.url
+        return None
+
+
+class BundleSerializer(serializers.ModelSerializer):
+    products = BundleProductSerializer(many=True, read_only=True)
+    original_price = serializers.SerializerMethodField()
+    discount_percent = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Bundle
+        fields = [
+            'id', 'name', 'description',
+            'image_url', 'bundle_price',
+            'original_price', 'discount_percent',
+            'products'
+        ]
+
+    def get_original_price(self, obj):
+        return float(obj.original_price())
+
+    def get_discount_percent(self, obj):
+        return float(obj.discount_percent())
+
+    def get_image_url(self, obj):
+        request = self.context.get('request')
+        if obj.image and hasattr(obj.image, 'url'):
+            return request.build_absolute_uri(obj.image.url) if request else obj.image.url
         return None
