@@ -47,7 +47,7 @@ class FlashSale(models.Model):
         return f"{self.title} ({self.start_time} → {self.end_time})"
     
 class Bundle(models.Model):
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=500)
     description = models.TextField(blank=True, null=True)
     image = models.ImageField(upload_to='bundles/', blank=True, null=True)
     products = models.ManyToManyField(Product, blank=True)
