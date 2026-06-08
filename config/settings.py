@@ -32,7 +32,8 @@ CSRF_TRUSTED_ORIGINS = [
     'https://web-production-a78c03.up.railway.app',
     'https://instant-admin-pannel-jews57a73-godlryuks-projects.vercel.app',
 ]
-
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
 
 
 # Application definition
