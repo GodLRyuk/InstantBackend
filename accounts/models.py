@@ -16,11 +16,7 @@ class User(AbstractUser):
     phone = models.CharField(max_length=15, unique=True)
     address = models.TextField(blank=True, null=True)
     zip_code = models.CharField(max_length=10, blank=True, null=True)
-    profile_image = models.ImageField(
-        upload_to='profile_images/',
-        blank=True,
-        null=True
-    )
+    profile_image = models.ImageField(blank=True, null=True, upload_to='profile_images/', max_length=500)
     otp = models.CharField(max_length=6, null=True, blank=True)
     otp_created_at = models.DateTimeField(null=True, blank=True)
     is_verified = models.BooleanField(default=False)

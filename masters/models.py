@@ -2,7 +2,7 @@ from django.db import models
 
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
-    image = models.ImageField(upload_to='categories/', blank=True, null=True)
+    image = models.ImageField(upload_to='categories/', blank=True, null=True, max_length=500)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
@@ -33,7 +33,7 @@ class Unit(models.Model):
         return self.name
 class Banner(models.Model):
     title = models.CharField(max_length=200)
-    image = models.ImageField(upload_to='banners/')  # images will go to media/banners/
+    image = models.ImageField(upload_to='banners/', max_length=500)  # images will go to media/banners/
     link = models.URLField(blank=True, null=True)   # optional link when banner is clicked
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)  # timestamp for creation
@@ -42,7 +42,7 @@ class Banner(models.Model):
     def __str__(self):
         return self.title
 class AdvBanner(models.Model):
-    image = models.ImageField(upload_to='advbanners/')  # images will go to media/banners/
+    image = models.ImageField(upload_to='advbanners/', max_length=500)  # images will go to media/banners/
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)  # timestamp for creation
     updated_at = models.DateTimeField(auto_now=True)      # timestamp for updatesjdjhj
