@@ -15,10 +15,12 @@ class StockBatchSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'product',
-            'product_name',
             'batch_no',
-            'quantity',
-            'purchase_price',
-            'selling_price',
-            'created_at'
+            'product_name',
+            'total_stock',
+            'reserved_stock',
+            'available_stock',
+            'low_stock_threshold',
+            'is_low_stock',
+            'updated_at'
         ] 

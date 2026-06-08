@@ -135,12 +135,11 @@ class InventoryListAPIView(APIView):
             {
                 "product_id": inv.product.id,
                 "product_name": inv.product.name,
-                "total_stock": inv.total_stock,
-                "reserved_stock": inv.reserved_stock,
-                "available_stock": inv.total_stock - inv.reserved_stock,
-                "low_stock_threshold": inv.low_stock_threshold,
-                "is_low_stock": inv.total_stock <= inv.low_stock_threshold,
-                "updated_at": inv.updated_at,
+                "batch_no": inv.batch_no,
+                "quantity": inv.quantity,
+                "purchase_price": inv.purchase_price,
+                "selling_price": inv.selling_price,
+                "created_at": inv.created_at,
             }
             for inv in inventories
         ])
