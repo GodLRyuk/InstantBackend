@@ -21,4 +21,4 @@ class StockBatchSerializer(serializers.ModelSerializer):
             'purchase_price',
             'selling_price',
             'created_at'
-        ]       
+        ] 

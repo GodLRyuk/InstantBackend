@@ -91,19 +91,9 @@ class UpdateStockAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 class StockListAPIView(APIView):
     def get(self, request):
-        # Aggregate by product & batch_no
-        stocks = (
-            StockBatch.objects
-            .values('id','product_id', 'batch_no', 'product__name')
-            .annotate(
-                quantity=Sum('quantity'),
-                purchase_price=Sum('purchase_price'),
-                selling_price=Sum('selling_price')
-            )
-            .order_by('-product_id')
-        )
-
-        return Response(stocks)
+        stocks = StockBatch.objects.all().order_by('-id')  # ✅ Fixed: was Inventory.objects.all()
+        serializer = StockBatchSerializer(stocks, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 class DeleteStockAPIView(APIView):
     """
     Delete a StockBatch and adjust Inventory accordingly

@@ -7,4 +7,5 @@ urlpatterns = [
     path('delete/<int:pk>/', DeleteStockAPIView.as_view(), name='delete-stock'),
     path('inventory/', StockListAPIView.as_view(), name="list-stock"),   # ✅ StockBatch data
     path('', InventoryListAPIView.as_view(), name="inventory-list"),     # ✅ Inventory data
+    
 ]
