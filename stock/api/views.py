@@ -7,7 +7,7 @@ from products.models import Product
 from stock.models import Inventory, StockBatch
 from rest_framework.generics import ListAPIView
 from django.shortcuts import get_object_or_404
-from ..serializers import StockBatchSerializer
+from ..serializers import InventorySerializer, StockBatchSerializer
 from django.db.models import Sum
 
 class AddStockAPIView(APIView):
@@ -130,16 +130,5 @@ class DeleteStockAPIView(APIView):
 class InventoryListAPIView(APIView):
     def get(self, request):
         inventories = Inventory.objects.select_related('product').all()
-
-        return Response([
-            {
-                "product_id": inv.product.id,
-                "product_name": inv.product.name,
-                "batch_no": inv.batch_no,
-                "quantity": inv.quantity,
-                "purchase_price": inv.purchase_price,
-                "selling_price": inv.selling_price,
-                "created_at": inv.created_at,
-            }
-            for inv in inventories
-        ])
+        serializer = InventorySerializer(inventories, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
