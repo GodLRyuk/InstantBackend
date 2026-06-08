@@ -30,6 +30,7 @@ DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = ["*"]
 CSRF_TRUSTED_ORIGINS = [
     'https://web-production-a78c03.up.railway.app',
+    'https://instant-admin-pannel-jews57a73-godlryuks-projects.vercel.app',
 ]
 
 
