@@ -25,7 +25,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
             'product_name',
             'quantity',
             'price',
-            'total_price'
+            'total_price',
             'batch',
             'batch_no'
         ]
