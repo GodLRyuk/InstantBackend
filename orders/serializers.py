@@ -1,6 +1,9 @@
 # orders/serializers.py
 
+from PIL.Image import item
 from rest_framework import serializers
+
+from stock.models import StockBatch
 from .models import Order, OrderItem
 from django.db import transaction
 from products.models import Product
@@ -12,6 +15,7 @@ from addresses.models import Address
 client = razorpay.Client(auth=("rzp_test_StsVgck8iNAA8a", "2950kn0jDNssYM656rGoJAt3"))
 class OrderItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
+    batch_no = serializers.CharField(source='batch.batch_no', read_only=True)
 
     class Meta:
         model = OrderItem
@@ -22,6 +26,8 @@ class OrderItemSerializer(serializers.ModelSerializer):
             'quantity',
             'price',
             'total_price'
+            'batch',
+            'batch_no'
         ]
 
 
@@ -173,16 +179,31 @@ class CreateOrderSerializer(serializers.Serializer):
         for item in order_items:
             total_price = item['price'] * item['quantity']
 
+            batch = (
+            StockBatch.objects
+                .filter(product=item['product'], quantity__gte=item['quantity'])
+                .order_by('created_at')  # oldest first
+                .first()
+            )
+
+
             OrderItem.objects.create(
                 order=order,
                 product=item['product'],
                 quantity=item['quantity'],
                 price=item['price'],
-                total_price=total_price
+                total_price=total_price,
+                batch=batch,
             )
 
-            inventory = item['product'].inventory
+            # Deduct from batch too
+            if batch:
+                batch.quantity -= item['quantity']
+                batch.save()
 
+
+            inventory = item['product'].inventory
+            inventory.total_stock -= item['quantity']
             if inventory.total_stock < item['quantity']:
                 raise serializers.ValidationError(
                     f"Insufficient stock for {item['product'].name}"

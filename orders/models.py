@@ -4,6 +4,7 @@ from products.models import Product
 from accounts.models import User
 from promotions.models import Coupon
 from addresses.models import Address
+from stock.models import StockBatch
 
 
 class Order(models.Model):
@@ -98,20 +99,20 @@ class Order(models.Model):
 
 
 class OrderItem(models.Model):
-    order = models.ForeignKey(
-        Order,
-        on_delete=models.CASCADE,
-        related_name='items'
-    )
-    product = models.ForeignKey(
-        Product,
-        on_delete=models.CASCADE
-    )
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField()
-    price = models.DecimalField(max_digits=10, decimal_places=2) 
+    price = models.DecimalField(max_digits=10, decimal_places=2)
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
-    def __str__(self):
-        return f"{self.product.name} x {self.quantity}"
+    
+    # ✅ NEW — which batch this item was pulled from
+    batch = models.ForeignKey(
+        StockBatch,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='order_items'
+    )
 
 class DeliveryAssignment(models.Model):
     order = models.ForeignKey("Order", on_delete=models.CASCADE)
