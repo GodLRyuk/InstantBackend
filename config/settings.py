@@ -35,7 +35,12 @@ CSRF_TRUSTED_ORIGINS = [
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
 
-
+CORS_ALLOWED_ORIGINS = [
+    'https://web-production-a78c03.up.railway.app',
+    'https://instant-admin-pannel-jews57a73-godlryuks-projects.vercel.app',
+]
+# or for development
+CORS_ALLOW_ALL_ORIGINS = True
 # Application definition
 
 INSTALLED_APPS = [
