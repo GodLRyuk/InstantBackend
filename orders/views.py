@@ -3,7 +3,7 @@
 from rest_framework.generics import ListAPIView, RetrieveAPIView, CreateAPIView
 from rest_framework.permissions import IsAuthenticated
 from .models import Order
-from .serializers import OrderSerializer, CreateOrderSerializer
+from .serializers import OrderSerializer, CreateOrderSerializer, ValidateOrderSerializer
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -431,3 +431,21 @@ class VerifyDeliveryOtpAPIView(APIView):
         cache.delete(f"delivery_otp:{pk}")
 
         return Response({"message": "OTP verified successfully"}, status=200)
+    
+class ValidateOrderView(APIView):
+    """
+    Validates location, pincode, and stock WITHOUT creating any order.
+    Frontend calls this before opening Razorpay.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ValidateOrderSerializer(
+            data=request.data,
+            context={"request": request}
+        )
+
+        if serializer.is_valid():
+            return Response({"valid": True}, status=200)
+
+        return Response(serializer.errors, status=400)

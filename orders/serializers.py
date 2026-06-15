@@ -262,3 +262,61 @@ class CreateOrderSerializer(serializers.Serializer):
             "payment_status": order.payment_status,
             "order_status": order.order_status
         }
+class ValidateOrderSerializer(serializers.Serializer):
+    """
+    Runs all pre-order checks — location, pincode, stock.
+    No DB writes at all.
+    """
+    items = CreateOrderItemSerializer(many=True)
+    address_id = serializers.IntegerField(required=True)
+    current_lat = serializers.FloatField(required=True)
+    current_lng = serializers.FloatField(required=True)
+
+    ALLOWED_PINCODES = [
+        "741121",
+        "741122",
+    ]
+
+    def validate(self, data):
+        user = self.context['request'].user
+        items = data.get('items', [])
+        address_id = data.get('address_id')
+        current_lat = data.get('current_lat')
+        current_lng = data.get('current_lng')
+
+        # ── 1. ADDRESS ───────────────────────────────────────
+        try:
+            address = Address.objects.get(id=address_id, user=user)
+        except Address.DoesNotExist:
+            raise serializers.ValidationError({"address": "Invalid address selected"})
+
+        pincode = str(address.pincode).strip()
+
+        # ── 2. PINCODE SERVICEABILITY ────────────────────────
+        if pincode not in self.ALLOWED_PINCODES:
+            raise serializers.ValidationError({
+                "pincode": "Sorry, delivery is not available in your area."
+            })
+
+        # ── 3. LOCATION CHECK ────────────────────────────────
+        location_check = validate_user_location(
+            current_lat=current_lat,
+            current_lng=current_lng,
+            address_pincode=pincode
+        )
+
+        if not location_check["valid"]:
+            raise serializers.ValidationError({
+                "location": location_check["error"]
+            })
+
+        # ── 4. STOCK CHECK ───────────────────────────────────
+        for item in items:
+            product = item['product']
+            inventory = product.inventory
+            if item['quantity'] > inventory.available_stock():
+                raise serializers.ValidationError({
+                    "stock": f"Insufficient stock for {product.name}"
+                })
+
+        return data
