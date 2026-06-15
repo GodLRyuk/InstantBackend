@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     'promotions',
     'addresses',
     'reviews',
+    'wishlist',
 ]
 AUTH_USER_MODEL = 'accounts.User'
 ASGI_APPLICATION = 'config.asgi.application'
