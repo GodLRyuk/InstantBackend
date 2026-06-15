@@ -17,14 +17,14 @@ class CouponAdmin(admin.ModelAdmin):
 @admin.register(DeliverySettings)
 class DeliverySettingsAdmin(admin.ModelAdmin):
     list_display = [
-        'delivery_fee', 
-        'free_delivery_min', 
-        'coupon_unlock_min', 
-        'pass_price',
+        'delivery_fee',
+        'free_delivery_min',
+        'coupon_unlock_min',
+        'pass_price_monthly',  # ✅ updated
+        'pass_price_yearly',   # ✅ added
         'free_delivery_cap'
     ]
 
-    # Prevent adding/deleting — only edit the one row
     def has_add_permission(self, request):
         return not DeliverySettings.objects.exists()
 
