@@ -3,8 +3,6 @@ from . import views
 
 urlpatterns = [
     path("validate-coupon/", views.validate_coupon, name="validate_coupon"),
+    path("pass/purchase/", views.purchase_pass, name="purchase_pass"),
+    path("pass/status/", views.pass_status, name="pass_status"),
 ]
-
-# In your root urls.py, include this with:
-#   path("api/promotions/", include("promotions.urls")),
-# So the full URL becomes: POST /api/promotions/validate-coupon/

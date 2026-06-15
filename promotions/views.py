@@ -1,55 +1,61 @@
-from .models import Coupon, CouponUsage
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework import status
+from django.utils import timezone
+from datetime import timedelta
+from .models import DeliveryPass
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def validate_coupon(request):
-    try:
-        data = request.data  # ✅ use request.data instead of json.loads(request.body)
-        code = data.get("code", "").strip().upper()
-        order_total = float(data.get("order_total", 0))
-    except (TypeError, ValueError):
-        return Response({"error": "Invalid request body."}, status=status.HTTP_400_BAD_REQUEST)
+def purchase_pass(request):
+    user = request.user
 
-    if not code:
-        return Response({"error": "Coupon code is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        coupon = Coupon.objects.get(code=code)
-    except Coupon.DoesNotExist:
-        return Response({"error": "Coupon not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    if not coupon.is_valid():
-        return Response({"error": "This coupon has expired or is inactive."}, status=status.HTTP_400_BAD_REQUEST)
-
-    if order_total < float(coupon.min_order_amount):
+    # Already has an active pass?
+    existing = getattr(user, 'delivery_pass', None)
+    if existing and existing.is_valid():
         return Response(
-            {"error": f"Minimum order of ₹{coupon.min_order_amount} required for this coupon."},
-            status=status.HTTP_400_BAD_REQUEST,
+            {"error": f"You already have an active pass valid until {existing.expires_at.date()}"},
+            status=400
         )
 
-    # ── One-time-per-user check ────────────────────────
-    if coupon.one_time_per_user:
-        already_used = CouponUsage.objects.filter(
-            coupon=coupon, user=request.user
-        ).exists()
-        if already_used:
-            return Response(
-                {"error": "You have already used this coupon."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+    # Create or renew
+    expires_at = timezone.now() + timedelta(days=365)
 
-    discount = float(coupon.calculate_discount(order_total))
+    DeliveryPass.objects.update_or_create(
+        user=user,
+        defaults={
+            "amount_paid": 1499,
+            "expires_at": expires_at,
+            "is_active": True,
+            "free_deliveries_used": 0,
+        }
+    )
 
     return Response({
         "success": True,
-        "code": coupon.code,
-        "coupon_type": coupon.coupon_type,
-        "value": float(coupon.value),
-        "discount": discount,
-        "min_order_amount": float(coupon.min_order_amount),
-        "message": f"Coupon applied! You save ₹{discount:.2f}",
+        "message": "Delivery Pass activated!",
+        "valid_until": expires_at.date(),
+        "benefits": {
+            "free_delivery_min_order": f"₹{DeliveryPass.MIN_ORDER_DELIVERY}",
+            "coupon_unlock_at": f"₹{DeliveryPass.MIN_ORDER_COUPON}",
+            "free_deliveries_per_month": DeliveryPass.FREE_DELIVERY_CAP,
+        }
+    })
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def pass_status(request):
+    delivery_pass = getattr(request.user, 'delivery_pass', None)
+
+    if not delivery_pass or not delivery_pass.is_valid():
+        return Response({"has_pass": False})
+
+    delivery_pass.reset_monthly_count_if_needed()
+
+    return Response({
+        "has_pass": True,
+        "valid_until": delivery_pass.expires_at.date(),
+        "free_deliveries_used_this_month": delivery_pass.free_deliveries_used,
+        "free_deliveries_remaining": max(
+            0, DeliveryPass.FREE_DELIVERY_CAP - delivery_pass.free_deliveries_used
+        ),
+        "coupon_unlock_at": DeliveryPass.MIN_ORDER_COUPON,
+        "free_delivery_min_order": DeliveryPass.MIN_ORDER_DELIVERY,
     })

@@ -1,5 +1,3 @@
-# orders/serializers.py
-
 from PIL.Image import item
 from rest_framework import serializers
 
@@ -8,12 +6,15 @@ from stock.models import StockBatch
 from .models import Order, OrderItem
 from django.db import transaction
 from products.models import Product
-from promotions.models import Coupon
+from promotions.models import Coupon, DeliveryPass
+from core.models import DeliverySettings
 import razorpay
 from addresses.models import Address
 
 
 client = razorpay.Client(auth=("rzp_test_StsVgck8iNAA8a", "2950kn0jDNssYM656rGoJAt3"))
+
+
 class OrderItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     batch_no = serializers.CharField(source='batch.batch_no', read_only=True)
@@ -36,11 +37,9 @@ class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     coupon_code = serializers.CharField(source='coupon.code', read_only=True)
 
-    # 🔥 ADD THESE (if exist in model)
     razorpay_order_id = serializers.CharField(read_only=True)
     razorpay_payment_id = serializers.CharField(read_only=True)
 
-    # 🚚 If you have address relation
     address = serializers.SerializerMethodField()
 
     class Meta:
@@ -49,6 +48,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'id',
             'total_amount',
             'discount_amount',
+            'delivery_fee',
             'coupon_code',
             'payment_status',
             'order_status',
@@ -59,15 +59,13 @@ class OrderSerializer(serializers.ModelSerializer):
             'address'
         ]
 
-    address = serializers.SerializerMethodField()
-
     def get_address(self, obj):
         return obj.address_snapshot
 
 
 class CreateOrderItemSerializer(serializers.Serializer):
     product = serializers.PrimaryKeyRelatedField(
-    queryset=Product.objects.all()
+        queryset=Product.objects.all()
     )
     quantity = serializers.IntegerField()
 
@@ -114,11 +112,18 @@ class CreateOrderSerializer(serializers.Serializer):
     def create(self, validated_data):
         user = self.context['request'].user
         items_data = validated_data['items']
-        coupon_code = validated_data.get('coupon_code')
+        coupon_code = validated_data.get('coupon_code', '').strip().upper()
         address_id = validated_data.get('address_id')
         payment_method = validated_data.get('payment_method')
         current_lat = validated_data.get('current_lat')
         current_lng = validated_data.get('current_lng')
+
+        # ---------------- LOAD SETTINGS FROM DB ----------------
+        config = DeliverySettings.get()
+
+        DELIVERY_FEE        = config.delivery_fee        # e.g. ₹40
+        MIN_ORDER_DELIVERY  = config.free_delivery_min   # e.g. ₹149
+        MIN_ORDER_COUPON    = config.coupon_unlock_min   # e.g. ₹299
 
         # ---------------- ADDRESS ----------------
         try:
@@ -140,6 +145,7 @@ class CreateOrderSerializer(serializers.Serializer):
             raise serializers.ValidationError({
                 "pincode": "Sorry, delivery is not available in your area."
             })
+
         # ---------------- LOCATION CHECK ----------------
         location_check = validate_user_location(
             current_lat=current_lat,
@@ -152,15 +158,15 @@ class CreateOrderSerializer(serializers.Serializer):
                 "location": location_check["error"]
             })
 
-        # ---------------- TOTAL CALC ----------------
-        total_amount = 0
+        # ---------------- TOTAL CALC (subtotal only) ----------------
+        subtotal = 0
         order_items = []
 
         for item in items_data:
             product = item['product']
             price = product.discounted_price()
 
-            total_amount += price * item['quantity']
+            subtotal += price * item['quantity']
 
             order_items.append({
                 "product": product,
@@ -168,17 +174,77 @@ class CreateOrderSerializer(serializers.Serializer):
                 "price": price
             })
 
+        # ---------------- DELIVERY FEE ----------------
+        delivery_fee = DELIVERY_FEE  # default — always charge unless pass qualifies
+
+        delivery_pass = getattr(user, 'delivery_pass', None)
+        pass_active = delivery_pass and delivery_pass.is_valid()
+
+        if pass_active:
+            if subtotal >= MIN_ORDER_DELIVERY:
+                # pass qualifies — check monthly cap
+                if delivery_pass.can_use_free_delivery():
+                    delivery_fee = 0                    # ✅ free delivery
+                    delivery_pass.use_free_delivery()   # increment monthly counter
+                else:
+                    # cap hit for this month
+                    raise serializers.ValidationError(
+                        "You've used all 20 free deliveries this month. "
+                        "Free deliveries reset on the 1st of next month."
+                    )
+            # subtotal < MIN_ORDER_DELIVERY → charge normal fee, no error
+
         # ---------------- COUPON ----------------
         discount_amount = 0
         applied_coupon = None
 
         if coupon_code:
+            # Gate 1 — members only
+            if not pass_active:
+                raise serializers.ValidationError(
+                    "Coupons are available for Pass members only."
+                )
+
+            # Gate 2 — subtotal must reach unlock threshold
+            if subtotal < MIN_ORDER_COUPON:
+                shortage = MIN_ORDER_COUPON - subtotal
+                raise serializers.ValidationError(
+                    f"Add items worth ₹{shortage:.0f} more to unlock coupons."
+                )
+
+            # Gate 3 — coupon exists, active, not expired
             try:
                 applied_coupon = Coupon.objects.get(code=coupon_code)
-                discount_amount = applied_coupon.calculate_discount(total_amount)
-                total_amount -= discount_amount
             except Coupon.DoesNotExist:
-                raise serializers.ValidationError("Invalid coupon code")
+                raise serializers.ValidationError("Invalid coupon code.")
+
+            if not applied_coupon.is_valid():
+                raise serializers.ValidationError(
+                    "This coupon has expired or is inactive."
+                )
+
+            # Gate 4 — coupon's own min order (against subtotal)
+            if subtotal < float(applied_coupon.min_order_amount):
+                raise serializers.ValidationError(
+                    f"This coupon requires a minimum order of ₹{applied_coupon.min_order_amount}."
+                )
+
+            # Gate 5 — one-time use check
+            if applied_coupon.one_time_per_user:
+                already_used = CouponUsage.objects.filter(
+                    coupon=applied_coupon, user=user
+                ).exists()
+                if already_used:
+                    raise serializers.ValidationError(
+                        "You have already used this coupon."
+                    )
+
+            # ✅ All gates passed — calculate discount on subtotal
+            discount_amount = applied_coupon.calculate_discount(float(subtotal))
+
+        # ---------------- FINAL TOTAL ----------------
+        # subtotal - coupon discount + delivery fee
+        total_amount = subtotal - discount_amount + delivery_fee
 
         # ---------------- CREATE ORDER ----------------
         order = Order.objects.create(
@@ -186,6 +252,7 @@ class CreateOrderSerializer(serializers.Serializer):
             total_amount=total_amount,
             coupon=applied_coupon,
             discount_amount=discount_amount,
+            delivery_fee=delivery_fee,          # ← store delivery fee on order
             payment_status="PENDING",
             payment_method=payment_method,
             address_snapshot=address_snapshot
@@ -196,12 +263,11 @@ class CreateOrderSerializer(serializers.Serializer):
             total_price = item['price'] * item['quantity']
 
             batch = (
-            StockBatch.objects
+                StockBatch.objects
                 .filter(product=item['product'], quantity__gte=item['quantity'])
-                .order_by('created_at')  # oldest first
+                .order_by('created_at')   # oldest first (FIFO)
                 .first()
             )
-
 
             OrderItem.objects.create(
                 order=order,
@@ -212,14 +278,14 @@ class CreateOrderSerializer(serializers.Serializer):
                 batch=batch,
             )
 
-            # Deduct from batch too
+            # Deduct from batch
             if batch:
                 batch.quantity -= item['quantity']
                 batch.save()
 
-
+            # Deduct from inventory
             inventory = item['product'].inventory
-            inventory.total_stock -= item['quantity']
+
             if inventory.total_stock < item['quantity']:
                 raise serializers.ValidationError(
                     f"Insufficient stock for {item['product'].name}"
@@ -256,65 +322,14 @@ class CreateOrderSerializer(serializers.Serializer):
         return {
             "order_id": order.id,
             "razorpay_order_id": razorpay_order_id,
+            "subtotal": str(subtotal),
+            "delivery_fee": str(delivery_fee),
+            "discount_amount": str(discount_amount),
             "amount": str(total_amount),
             "currency": "INR",
             "payment_method": payment_method,
             "payment_status": order.payment_status,
-            "order_status": order.order_status
+            "order_status": order.order_status,
+            "pass_used": pass_active and delivery_fee == 0,
+            "coupon_applied": applied_coupon.code if applied_coupon else None,
         }
-class ValidateOrderSerializer(serializers.Serializer):
-    """
-    Runs all pre-order checks — location, pincode, stock.
-    No DB writes at all.
-    """
-    items = CreateOrderItemSerializer(many=True)
-    address_id = serializers.IntegerField(required=True)
-    current_lat = serializers.FloatField(required=True)
-    current_lng = serializers.FloatField(required=True)
-
-    ALLOWED_PINCODES = [
-        "741121",
-        "741122",
-    ]
-
-    def validate(self, data):
-        user = self.context['request'].user
-        items = data.get('items', [])
-        address_id = data.get('address_id')
-        current_lat = data.get('current_lat')
-        current_lng = data.get('current_lng')
-
-        # ── 1. ADDRESS ───────────────────────────────────────
-        try:
-            address = Address.objects.get(id=address_id, user=user)
-        except Address.DoesNotExist:
-            raise serializers.ValidationError({"address": "Invalid address selected"})
-
-        pincode = str(address.pincode).strip()
-
-        # ── 2. PINCODE SERVICEABILITY ────────────────────────
-        if pincode not in self.ALLOWED_PINCODES:
-            raise serializers.ValidationError({
-                "pincode": "Sorry, delivery is not available in your area."
-            })
-
-        # ── 3. LOCATION CHECK ────────────────────────────────
-        location_check = validate_user_location(
-            current_lat=current_lat,
-            current_lng=current_lng,
-            address_pincode=pincode
-        )
-
-        if not location_check["valid"]:
-            raise serializers.ValidationError(location_check["error"])
-
-        # ── 4. STOCK CHECK ───────────────────────────────────
-        for item in items:
-            product = item['product']
-            inventory = product.inventory
-            if item['quantity'] > inventory.available_stock():
-                raise serializers.ValidationError({
-                    "stock": f"Insufficient stock for {product.name}"
-                })
-
-        return data
