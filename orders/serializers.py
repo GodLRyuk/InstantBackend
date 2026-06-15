@@ -306,9 +306,7 @@ class ValidateOrderSerializer(serializers.Serializer):
         )
 
         if not location_check["valid"]:
-            raise serializers.ValidationError({
-                "location": location_check["error"]
-            })
+            raise serializers.ValidationError(location_check["error"])
 
         # ── 4. STOCK CHECK ───────────────────────────────────
         for item in items:
