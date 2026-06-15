@@ -3,6 +3,7 @@
 from PIL.Image import item
 from rest_framework import serializers
 
+from orders.location_utils import validate_user_location
 from stock.models import StockBatch
 from .models import Order, OrderItem
 from django.db import transaction
@@ -76,6 +77,8 @@ class CreateOrderSerializer(serializers.Serializer):
     coupon_code = serializers.CharField(required=False, allow_blank=True)
     address_id = serializers.IntegerField(required=True)
     payment_method = serializers.CharField(required=True)
+    current_lat = serializers.FloatField(required=True)
+    current_lng = serializers.FloatField(required=True)
 
     ALLOWED_PINCODES = [
         "741121",
@@ -114,6 +117,8 @@ class CreateOrderSerializer(serializers.Serializer):
         coupon_code = validated_data.get('coupon_code')
         address_id = validated_data.get('address_id')
         payment_method = validated_data.get('payment_method')
+        current_lat = validated_data.get('current_lat')
+        current_lng = validated_data.get('current_lng')
 
         # ---------------- ADDRESS ----------------
         try:
@@ -134,6 +139,17 @@ class CreateOrderSerializer(serializers.Serializer):
         if address_snapshot["pincode"] not in self.ALLOWED_PINCODES:
             raise serializers.ValidationError({
                 "pincode": "Sorry, delivery is not available in your area."
+            })
+        # ---------------- LOCATION CHECK ----------------
+        location_check = validate_user_location(
+            current_lat=current_lat,
+            current_lng=current_lng,
+            address_pincode=address_snapshot["pincode"]
+        )
+
+        if not location_check["valid"]:
+            raise serializers.ValidationError({
+                "location": location_check["error"]
             })
 
         # ---------------- TOTAL CALC ----------------
@@ -171,7 +187,7 @@ class CreateOrderSerializer(serializers.Serializer):
             coupon=applied_coupon,
             discount_amount=discount_amount,
             payment_status="PENDING",
-            payment_method=payment_method,   # ✅ IMPORTANT FIX
+            payment_method=payment_method,
             address_snapshot=address_snapshot
         )
 
