@@ -7,7 +7,7 @@ from .models import Order, OrderItem
 from django.db import transaction
 from products.models import Product
 from promotions.models import Coupon, DeliveryPass
-from core.models import DeliverySettings
+from promotions.models import DeliverySettings
 import razorpay
 from addresses.models import Address
 
