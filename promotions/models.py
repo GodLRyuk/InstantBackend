@@ -44,30 +44,34 @@ class CouponUsage(models.Model):
         unique_together = ('coupon', 'user')  # prevents duplicate entries
 
 class DeliveryPass(models.Model):
+    PLAN_CHOICES = [
+        ("MONTHLY", "Monthly"),
+        ("YEARLY", "Yearly"),
+    ]
+
     user = models.OneToOneField(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.CASCADE, 
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
         related_name='delivery_pass'
     )
-    amount_paid    = models.DecimalField(max_digits=10, decimal_places=2, default=1499)
-    purchased_at   = models.DateTimeField(auto_now_add=True)
-    expires_at     = models.DateTimeField()
-    is_active      = models.BooleanField(default=True)
-    free_deliveries_used = models.PositiveIntegerField(default=0)  # resets monthly
-    last_reset_month     = models.PositiveIntegerField(null=True, blank=True)
-    last_reset_year      = models.PositiveIntegerField(null=True, blank=True)
+    plan_type          = models.CharField(max_length=10, choices=PLAN_CHOICES, default="MONTHLY")
+    amount_paid        = models.DecimalField(max_digits=10, decimal_places=2, default=999)
+    purchased_at       = models.DateTimeField(auto_now_add=True)
+    expires_at         = models.DateTimeField()
+    is_active          = models.BooleanField(default=True)
+    free_deliveries_used  = models.PositiveIntegerField(default=0)
+    last_reset_month      = models.PositiveIntegerField(null=True, blank=True)
+    last_reset_year       = models.PositiveIntegerField(null=True, blank=True)
 
-    FREE_DELIVERY_CAP    = 20
-    MIN_ORDER_DELIVERY   = 149   # min subtotal for free delivery
-    MIN_ORDER_COUPON     = 299   # min subtotal to unlock coupon
+    FREE_DELIVERY_CAP  = 20
 
     def is_valid(self):
         return self.is_active and timezone.now() < self.expires_at
 
     def reset_monthly_count_if_needed(self):
         now = timezone.now()
-        if (self.last_reset_month != now.month or 
-            self.last_reset_year != now.year):
+        if (self.last_reset_month != now.month or
+                self.last_reset_year != now.year):
             self.free_deliveries_used = 0
             self.last_reset_month = now.month
             self.last_reset_year = now.year
@@ -76,7 +80,7 @@ class DeliveryPass(models.Model):
     def can_use_free_delivery(self):
         self.reset_monthly_count_if_needed()
         return (
-            self.is_valid() and 
+            self.is_valid() and
             self.free_deliveries_used < self.FREE_DELIVERY_CAP
         )
 
@@ -84,24 +88,24 @@ class DeliveryPass(models.Model):
         self.free_deliveries_used += 1
         self.save()
 
-    def can_use_coupon(self, order_subtotal):
-        return self.is_valid() and order_subtotal >= self.MIN_ORDER_COUPON
+    def can_use_coupon(self, order_subtotal, min_amount):
+        return self.is_valid() and order_subtotal >= min_amount
 
     def __str__(self):
-        return f"Pass({self.user.email}) expires {self.expires_at.date()}"
+        return f"{self.plan_type} Pass — {self.user.email} — expires {self.expires_at.date()}"
     
 class DeliverySettings(models.Model):
     delivery_fee        = models.DecimalField(max_digits=6, decimal_places=2, default=40)
     free_delivery_min   = models.DecimalField(max_digits=6, decimal_places=2, default=149)
     coupon_unlock_min   = models.DecimalField(max_digits=6, decimal_places=2, default=299)
-    pass_price          = models.DecimalField(max_digits=6, decimal_places=2, default=1499)
-    free_delivery_cap   = models.PositiveIntegerField(default=20)  # per month
+    pass_price_monthly  = models.DecimalField(max_digits=6, decimal_places=2, default=999)   # ← new
+    pass_price_yearly   = models.DecimalField(max_digits=6, decimal_places=2, default=1499)  # ← new
+    free_delivery_cap   = models.PositiveIntegerField(default=20)
 
     class Meta:
         verbose_name = "Delivery Settings"
 
     def save(self, *args, **kwargs):
-        # Always keep only one row
         self.pk = 1
         super().save(*args, **kwargs)
 

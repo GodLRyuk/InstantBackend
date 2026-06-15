@@ -4,7 +4,7 @@ from rest_framework.response import Response  # ✅ fixed — was importing from
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework import status
-from .models import DeliveryPass, Coupon, CouponUsage
+from .models import DeliveryPass, Coupon, CouponUsage, DeliverySettings
 
 
 @api_view(['POST'])
@@ -87,24 +87,38 @@ def validate_coupon(request):
 def purchase_pass(request):
     user = request.user
 
+    # plan_type from request — "MONTHLY" or "YEARLY"
+    plan_type = request.data.get("plan_type", "MONTHLY").upper()
+
+    if plan_type not in ["MONTHLY", "YEARLY"]:
+        return Response(
+            {"error": "Invalid plan type. Choose MONTHLY or YEARLY."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     # Already has an active pass?
     existing = getattr(user, 'delivery_pass', None)
     if existing and existing.is_valid():
         return Response(
-            {"error": f"You already have an active pass valid until {existing.expires_at.date()}"},
+            {"error": f"You already have an active {existing.plan_type} pass valid until {existing.expires_at.date()}"},
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Load price from DB settings
-    from promotions.models import DeliverySettings
+    # Load prices from DB
     config = DeliverySettings.get()
 
-    expires_at = timezone.now() + timedelta(days=365)
+    if plan_type == "MONTHLY":
+        amount = config.pass_price_monthly
+        expires_at = timezone.now() + timedelta(days=30)
+    else:
+        amount = config.pass_price_yearly
+        expires_at = timezone.now() + timedelta(days=365)
 
     DeliveryPass.objects.update_or_create(
         user=user,
         defaults={
-            "amount_paid": config.pass_price,  # ✅ from DB not hardcoded
+            "plan_type": plan_type,
+            "amount_paid": amount,
             "expires_at": expires_at,
             "is_active": True,
             "free_deliveries_used": 0,
@@ -113,7 +127,9 @@ def purchase_pass(request):
 
     return Response({
         "success": True,
-        "message": "Delivery Pass activated!",
+        "plan_type": plan_type,
+        "message": f"{'Monthly' if plan_type == 'MONTHLY' else 'Yearly'} Delivery Pass activated!",
+        "amount_paid": str(amount),
         "valid_until": expires_at.date(),
         "benefits": {
             "free_delivery_min_order": f"₹{config.free_delivery_min}",
@@ -132,12 +148,12 @@ def pass_status(request):
         return Response({"has_pass": False})
 
     delivery_pass.reset_monthly_count_if_needed()
-
-    from promotions.models import DeliverySettings
     config = DeliverySettings.get()
 
     return Response({
         "has_pass": True,
+        "plan_type": delivery_pass.plan_type,
+        "amount_paid": str(delivery_pass.amount_paid),
         "valid_until": delivery_pass.expires_at.date(),
         "free_deliveries_used_this_month": delivery_pass.free_deliveries_used,
         "free_deliveries_remaining": max(
