@@ -86,8 +86,6 @@ def validate_coupon(request):
 @permission_classes([IsAuthenticated])
 def purchase_pass(request):
     user = request.user
-
-    # plan_type from request — "MONTHLY" or "YEARLY"
     plan_type = request.data.get("plan_type", "MONTHLY").upper()
 
     if plan_type not in ["MONTHLY", "YEARLY"]:
@@ -96,7 +94,6 @@ def purchase_pass(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Already has an active pass?
     existing = getattr(user, 'delivery_pass', None)
     if existing and existing.is_valid():
         return Response(
@@ -104,37 +101,39 @@ def purchase_pass(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Load prices from DB
     config = DeliverySettings.get()
 
     if plan_type == "MONTHLY":
-        amount = config.pass_price_monthly
+        amount    = config.pass_price_monthly
         expires_at = timezone.now() + timedelta(days=30)
+        cap       = config.free_delivery_cap_monthly   # ← 8
     else:
-        amount = config.pass_price_yearly
+        amount    = config.pass_price_yearly
         expires_at = timezone.now() + timedelta(days=365)
+        cap       = config.free_delivery_cap_yearly    # ← 20
 
     DeliveryPass.objects.update_or_create(
         user=user,
         defaults={
-            "plan_type": plan_type,
-            "amount_paid": amount,
-            "expires_at": expires_at,
-            "is_active": True,
-            "free_deliveries_used": 0,
+            "plan_type":             plan_type,
+            "amount_paid":           amount,
+            "expires_at":            expires_at,
+            "is_active":             True,
+            "free_deliveries_used":  0,
+            "monthly_cap":           cap,           # ← store on pass
         }
     )
 
     return Response({
-        "success": True,
-        "plan_type": plan_type,
-        "message": f"{'Monthly' if plan_type == 'MONTHLY' else 'Yearly'} Delivery Pass activated!",
+        "success":    True,
+        "plan_type":  plan_type,
+        "message":    f"{'Monthly' if plan_type == 'MONTHLY' else 'Yearly'} Delivery Pass activated!",
         "amount_paid": str(amount),
         "valid_until": expires_at.date(),
         "benefits": {
-            "free_delivery_min_order": f"₹{config.free_delivery_min}",
-            "coupon_unlock_at": f"₹{config.coupon_unlock_min}",
-            "free_deliveries_per_month": config.free_delivery_cap,
+            "free_delivery_min_order":    f"₹{config.free_delivery_min}",
+            "coupon_unlock_at":           f"₹{config.coupon_unlock_min}",
+            "free_deliveries_per_month":  cap,
         }
     })
 

@@ -62,6 +62,7 @@ class DeliveryPass(models.Model):
     free_deliveries_used  = models.PositiveIntegerField(default=0)
     last_reset_month      = models.PositiveIntegerField(null=True, blank=True)
     last_reset_year       = models.PositiveIntegerField(null=True, blank=True)
+    monthly_cap = models.PositiveIntegerField(default=8)
 
     FREE_DELIVERY_CAP  = 20
 
@@ -98,8 +99,10 @@ class DeliverySettings(models.Model):
     delivery_fee        = models.DecimalField(max_digits=6, decimal_places=2, default=40)
     free_delivery_min   = models.DecimalField(max_digits=6, decimal_places=2, default=149)
     coupon_unlock_min   = models.DecimalField(max_digits=6, decimal_places=2, default=299)
-    pass_price_monthly  = models.DecimalField(max_digits=6, decimal_places=2, default=999)   # ← new
-    pass_price_yearly   = models.DecimalField(max_digits=6, decimal_places=2, default=1499)  # ← new
+    pass_price_monthly  = models.DecimalField(max_digits=6, decimal_places=2, default=999)  
+    pass_price_yearly   = models.DecimalField(max_digits=6, decimal_places=2, default=1499) 
+    free_delivery_cap_monthly = models.PositiveIntegerField(default=8)  
+    free_delivery_cap_yearly  = models.PositiveIntegerField(default=20) 
     free_delivery_cap   = models.PositiveIntegerField(default=20)
 
     class Meta:

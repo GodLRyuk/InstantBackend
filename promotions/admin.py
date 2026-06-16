@@ -74,9 +74,11 @@ class DeliverySettingsAdmin(admin.ModelAdmin):
         'free_delivery_min',
         'coupon_unlock_min',
         'pass_price_monthly',
+        'free_delivery_cap_monthly',   # ← new
         'pass_price_yearly',
-        'free_delivery_cap',
+        'free_delivery_cap_yearly',    # ← new
     ]
+
 
     def has_add_permission(self, request):
         return not DeliverySettings.objects.exists()
