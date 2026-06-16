@@ -90,6 +90,7 @@ class CreateOrderSerializer(serializers.Serializer):
     ALLOWED_PINCODES = [
         "741121",
         "741122",
+        "700091",
     ]
 
     def validate(self, data):
