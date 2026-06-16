@@ -175,7 +175,7 @@ class CreateOrderSerializer(serializers.Serializer):
             "address_type": address.address_type,
         }
 
-        if address_snapshot["pincode"] not in self.ALLOWED_PINCODES:
+        if address_snapshot["pincode"] not in ALLOWED_PINCODES:
             raise serializers.ValidationError({
                 "pincode": "Sorry, delivery is not available in your area."
             })
@@ -390,7 +390,7 @@ class ValidateOrderSerializer(serializers.Serializer):
         pincode = str(address.pincode).strip()
 
         # ── 2. PINCODE SERVICEABILITY ────────────────────────
-        if pincode not in self.ALLOWED_PINCODES:
+        if pincode not in ALLOWED_PINCODES:
             raise serializers.ValidationError({
                 "pincode": "Sorry, delivery is not available in your area."
             })
