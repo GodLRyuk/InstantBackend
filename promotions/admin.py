@@ -1,24 +1,35 @@
 from django.contrib import admin
-from .models import Coupon, CouponUsage, DeliveryPass, DeliverySettings
+from .models import Coupon, CouponUsage, DeliverySettings
 
+@admin.register(Coupon)
+class CouponAdmin(admin.ModelAdmin):
+    list_display = (
+        'code', 
+        'coupon_type',   # matches your model field
+        'value',         # matches your model field
+        'min_order_amount',
+        'active',
+        'expires_at'
+    )
+    list_filter = ('active', 'coupon_type')
+    search_fields = ('code',)
 
-@admin.register(DeliveryPass)
-class DeliveryPassAdmin(admin.ModelAdmin):
+@admin.register(DeliverySettings)
+class DeliverySettingsAdmin(admin.ModelAdmin):
     list_display = [
-        'user',
-        'plan_type',
-        'amount_paid',
-        'purchased_at',
-        'expires_at',
-        'is_active',
-        'free_deliveries_used',
+        'delivery_fee',
+        'free_delivery_min',
+        'coupon_unlock_min',
+        'pass_price_monthly',  # ✅ updated
+        'pass_price_yearly',   # ✅ added
+        'free_delivery_cap'
     ]
-    list_filter = ['plan_type', 'is_active']
-    search_fields = ['user__email', 'user__phone']
-    readonly_fields = ['purchased_at', 'free_deliveries_used']
-    ordering = ['-purchased_at']
 
+    def has_add_permission(self, request):
+        return not DeliverySettings.objects.exists()
 
+    def has_delete_permission(self, request, obj=None):
+        return False
 @admin.register(CouponUsage)
 class CouponUsageAdmin(admin.ModelAdmin):
     list_display = ['user', 'coupon', 'used_at']
