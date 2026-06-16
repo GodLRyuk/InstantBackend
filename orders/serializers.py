@@ -15,7 +15,11 @@ from datetime import date as date_type  # 👈 add this import
 
 client = razorpay.Client(auth=("rzp_test_StsVgck8iNAA8a", "2950kn0jDNssYM656rGoJAt3"))
 
-
+ALLOWED_PINCODES = [
+        "741121",
+        "741122",
+        "700091",
+    ]
 class OrderItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     batch_no = serializers.CharField(source='batch.batch_no', read_only=True)
@@ -86,12 +90,6 @@ class CreateOrderSerializer(serializers.Serializer):
     scheduled_date       = serializers.DateField(required=False, allow_null=True)
     scheduled_slot_start = serializers.TimeField(required=False, allow_null=True)
     scheduled_slot_end   = serializers.TimeField(required=False, allow_null=True)
-
-    ALLOWED_PINCODES = [
-        "741121",
-        "741122",
-        "700091",
-    ]
 
     def validate(self, data):
         items = data.get('items')
@@ -375,11 +373,6 @@ class ValidateOrderSerializer(serializers.Serializer):
     address_id = serializers.IntegerField(required=True)
     current_lat = serializers.FloatField(required=True)
     current_lng = serializers.FloatField(required=True)
-
-    ALLOWED_PINCODES = [
-        "741121",
-        "741122",
-    ]
 
     def validate(self, data):
         user = self.context['request'].user
