@@ -82,7 +82,7 @@ class DeliveryPass(models.Model):
         self.reset_monthly_count_if_needed()
         return (
             self.is_valid() and
-            self.free_deliveries_used < self.FREE_DELIVERY_CAP
+            self.free_deliveries_used < self.monthly_cap  # ← use own cap
         )
 
     def use_free_delivery(self):

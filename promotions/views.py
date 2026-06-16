@@ -147,17 +147,17 @@ def pass_status(request):
         return Response({"has_pass": False})
 
     delivery_pass.reset_monthly_count_if_needed()
-    config = DeliverySettings.get()
+
+    cap = delivery_pass.monthly_cap  # ← from pass itself not global setting
 
     return Response({
-        "has_pass": True,
-        "plan_type": delivery_pass.plan_type,
-        "amount_paid": str(delivery_pass.amount_paid),
-        "valid_until": delivery_pass.expires_at.date(),
-        "free_deliveries_used_this_month": delivery_pass.free_deliveries_used,
-        "free_deliveries_remaining": max(
-            0, config.free_delivery_cap - delivery_pass.free_deliveries_used
-        ),
-        "coupon_unlock_at": config.coupon_unlock_min,
-        "free_delivery_min_order": config.free_delivery_min,
+        "has_pass":                      True,
+        "plan_type":                     delivery_pass.plan_type,
+        "amount_paid":                   str(delivery_pass.amount_paid),
+        "valid_until":                   delivery_pass.expires_at.date(),
+        "free_deliveries_used":          delivery_pass.free_deliveries_used,
+        "free_deliveries_remaining":     max(0, cap - delivery_pass.free_deliveries_used),
+        "free_delivery_cap":             cap,
+        "coupon_unlock_at":              DeliverySettings.get().coupon_unlock_min,
+        "free_delivery_min_order":       DeliverySettings.get().free_delivery_min,
     })
