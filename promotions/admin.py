@@ -24,12 +24,11 @@ class DeliverySettingsAdmin(admin.ModelAdmin):
         'pass_price_yearly',   # ✅ added
         'free_delivery_cap'
     ]
+    list_filter = ['plan_type', 'is_active']
+    search_fields = ['user__email', 'user__phone']
+    readonly_fields = ['purchased_at', 'free_deliveries_used']
+    ordering = ['-purchased_at']
 
-    def has_add_permission(self, request):
-        return not DeliverySettings.objects.exists()
-
-    def has_delete_permission(self, request, obj=None):
-        return False
 @admin.register(CouponUsage)
 class CouponUsageAdmin(admin.ModelAdmin):
     list_display = ['user', 'coupon', 'used_at']
