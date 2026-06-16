@@ -32,6 +32,20 @@ class Order(models.Model):
         ("DELIVERED", "Delivered"),   # Order delivered successfully
         ("CANCELLED", "Cancelled"),   # Order cancelled
     ]
+    # ---------------------- DELIVERY SCHEDULING ----------------------
+    DELIVERY_TYPE_CHOICES = [
+        ("ASAP", "As Soon As Possible"),
+        ("SCHEDULED", "Scheduled"),
+    ]
+
+    delivery_type = models.CharField(
+        max_length=10,
+        choices=DELIVERY_TYPE_CHOICES,
+        default="ASAP"
+    )
+    scheduled_date = models.DateField(null=True, blank=True)
+    scheduled_slot_start = models.TimeField(null=True, blank=True)
+    scheduled_slot_end = models.TimeField(null=True, blank=True)
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)

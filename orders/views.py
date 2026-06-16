@@ -17,6 +17,10 @@ from django.core.mail import send_mail
 import random
 from orders.utils import notify_driver
 from promotions.models import Coupon, CouponUsage
+from datetime import date, timedelta              # 👈 add
+from orders.slot_utils import generate_slots      # 👈 add
+from rest_framework.decorators import api_view, permission_classes  # 👈 add
+
 
 class OrderListView(ListAPIView):
     serializer_class = OrderSerializer
@@ -25,16 +29,15 @@ class OrderListView(ListAPIView):
     def get_queryset(self):
         user = self.request.user
 
-        # 🛠 ADMIN → see all orders
         if user.is_staff or getattr(user, "role", None) == "ADMIN":
             return Order.objects.all().prefetch_related('items__product').order_by('-id')
 
-        # 🚚 DRIVER → see assigned orders
         elif getattr(user, "role", None) == "DRIVER":
             return Order.objects.filter(driver=user).prefetch_related('items__product').order_by('-id')
 
-        # 👤 CUSTOMER → see own orders
         return Order.objects.filter(user=user).prefetch_related('items__product').order_by('-id')
+
+
 class OrderDetailView(RetrieveAPIView):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
@@ -49,6 +52,8 @@ class OrderDetailView(RetrieveAPIView):
             return Order.objects.filter(driver=user)
 
         return Order.objects.filter(user=user)
+
+
 class CancelOrderView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -67,6 +72,8 @@ class CancelOrderView(APIView):
         order.mark_cancelled()
 
         return Response({"message": "Order cancelled successfully"})
+
+
 class UpdateOrderStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -93,6 +100,8 @@ class UpdateOrderStatusView(APIView):
             return Response({"error": "Invalid status"}, status=400)
 
         return Response({"message": "Order status updated"})
+
+
 class CreateOrderView(CreateAPIView):
     serializer_class = CreateOrderSerializer
     permission_classes = [IsAuthenticated]
@@ -105,7 +114,7 @@ class CreateOrderView(CreateAPIView):
 
         serializer.is_valid(raise_exception=True)
         data = serializer.save()
-        # ✅ Auto assign driver after order is created
+
         try:
             order_id = data.get('order_id') or data.get('id')
             order = Order.objects.get(id=order_id)
@@ -134,18 +143,18 @@ class CreateOrderView(CreateAPIView):
         except Exception as e:
             print(f'⚠️ Auto assign failed: {e}')
 
-        # ✅ Record coupon usage if a one-time coupon was applied
         try:
             coupon_code = request.data.get("coupon_code", "").strip().upper()
             if coupon_code:
                 coupon = Coupon.objects.get(code=coupon_code, one_time_per_user=True)
                 CouponUsage.objects.get_or_create(coupon=coupon, user=request.user)
         except Coupon.DoesNotExist:
-            pass  # Not a one-time coupon, nothing to record
+            pass
         except Exception as e:
             print(f'⚠️ Coupon usage recording failed: {e}')
 
         return Response(data, status=201)
+
 
 class VerifyPaymentView(APIView):
     permission_classes = [IsAuthenticated]
@@ -161,23 +170,21 @@ class VerifyPaymentView(APIView):
             return Response({"error": "Order not found"}, status=404)
 
         generated_signature = hmac.new(
-        key=settings.RAZORPAY_SECRET.encode(),
-        msg=f"{order_id}|{payment_id}".encode(),
-        digestmod=hashlib.sha256
+            key=settings.RAZORPAY_SECRET.encode(),
+            msg=f"{order_id}|{payment_id}".encode(),
+            digestmod=hashlib.sha256
         ).hexdigest()
 
         if generated_signature == signature:
-            # ✅ Save Razorpay details
             order.razorpay_payment_id = payment_id
             order.razorpay_signature = signature
-
-            # ✅ Use your method
             order.mark_paid()
-
             return Response({"status": "Payment Verified & Order Updated"})
         else:
             order.mark_failed()
             return Response({"status": "Invalid Payment"}, status=400)
+
+
 class AssignDriverView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -190,13 +197,13 @@ class AssignDriverView(APIView):
         try:
             order = Order.objects.get(id=pk)
             driver = User.objects.get(id=driver_id)
-
             order.driver = driver
             order.save()
-
             return Response({"message": "Driver assigned"})
         except:
             return Response({"error": "Invalid data"}, status=400)
+
+
 class AutoAssignDriverAPIView(APIView):
 
     def post(self, request):
@@ -207,7 +214,6 @@ class AutoAssignDriverAPIView(APIView):
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
 
-        # ✅ Check if already assigned
         existing = DeliveryAssignment.objects.filter(order=order).first()
         if existing:
             notify_driver(existing.driver.id, {
@@ -227,7 +233,6 @@ class AutoAssignDriverAPIView(APIView):
                 "assignment_id": existing.id
             })
 
-        # ✅ New assignment
         driver = assign_driver(order)
         if not driver:
             return Response({"error": "No driver available"}, status=404)
@@ -255,6 +260,8 @@ class AutoAssignDriverAPIView(APIView):
             "driver_id": driver.id,
             "assignment_id": assignment.id
         })
+
+
 class DriverAssignedOrdersAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -276,51 +283,41 @@ class DriverAssignedOrdersAPIView(APIView):
 
             data.append({
                 "assignment_id": a.id,
-
-                # 📦 ORDER INFO
                 "order_id": order.id,
                 "order_status": order.order_status,
                 "payment_status": order.payment_status,
                 "total_amount": order.total_amount,
-
-                # 👤 CUSTOMER INFO
                 "customer_name": customer.username,
                 "customer_phone": customer.phone,
                 "customer_email": customer.email,
-
-                # 📍 ADDRESS INFO (IMPORTANT FIX BELOW)
                 "address": order.address_snapshot if order.address_snapshot else customer.address,
-
-                # 🚚 DRIVER INFO
                 "assigned_at": a.assigned_at,
                 "status": a.status,
             })
 
         return Response(data)
+
+
 class ConfirmPaymentView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         user = request.user
 
-        # ── PERMISSION CHECK ──────────────────────────────────
         if getattr(user, "role", None) not in ["DELIVERY", "ADMIN"] and not user.is_staff:
             return Response({"error": "Permission denied"}, status=403)
 
-        # ── ONLINE CHECK ──────────────────────────────────────
         if not getattr(user, "is_online", False) and not user.is_staff:
             return Response(
                 {"error": "You must be ONLINE to confirm payment"},
                 status=403
             )
 
-        # ── FETCH ORDER ───────────────────────────────────────
         try:
             order = Order.objects.get(id=pk)
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
 
-        # ── PAYMENT METHOD & STATUS ───────────────────────────
         payment_method = request.data.get("payment_method", "").upper()
         status_value   = request.data.get("status", "").upper()
 
@@ -330,11 +327,9 @@ class ConfirmPaymentView(APIView):
         if payment_method not in ["COD", "UPI"]:
             return Response({"error": "Invalid payment method"}, status=400)
 
-        # ── ALREADY PAID CHECK ────────────────────────────────
         if order.payment_status == "PAID":
             return Response({"message": "Payment already confirmed"})
 
-        # ── CONFIRM ───────────────────────────────────────────
         order.payment_status = "PAID"
         order.payment_method = payment_method
         order.save()
@@ -342,24 +337,22 @@ class ConfirmPaymentView(APIView):
         return Response({
             "message": f"{payment_method} payment confirmed successfully"
         }, status=200)
-    
+
+
 class SendDeliveryOtpAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         user = request.user
 
-        # ── PERMISSION CHECK ──────────────────────────────────
         if getattr(user, "role", None) not in ["DELIVERY", "ADMIN"] and not user.is_staff:
             return Response({"error": "Permission denied"}, status=403)
 
-        # ── FETCH ORDER ───────────────────────────────────────
         try:
             order = Order.objects.get(id=pk)
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
 
-        # ── CHECK ASSIGNMENT ──────────────────────────────────
         assignment = DeliveryAssignment.objects.filter(
             order=order, driver=user
         ).first()
@@ -370,11 +363,9 @@ class SendDeliveryOtpAPIView(APIView):
                 status=403
             )
 
-        # ── GENERATE + CACHE OTP ──────────────────────────────
         otp = str(random.randint(100000, 999999))
         cache.set(f"delivery_otp:{pk}", otp, timeout=600)
 
-        # ── SEND EMAIL ────────────────────────────────────────
         customer_email = order.user.email
         customer_name  = order.user.username
 
@@ -391,7 +382,6 @@ class SendDeliveryOtpAPIView(APIView):
                 recipient_list=[customer_email],
             )
         except Exception as e:
-            # delete cached OTP if email failed
             cache.delete(f"delivery_otp:{pk}")
             return Response(
                 {"error": f"Failed to send OTP email: {str(e)}"},
@@ -401,42 +391,36 @@ class SendDeliveryOtpAPIView(APIView):
         return Response({
             "message": f"OTP sent to customer email ({customer_email})"
         }, status=200)
+
+
 class VerifyDeliveryOtpAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
         user = request.user
 
-        # ── PERMISSION CHECK ──────────────────────────────────
         if getattr(user, "role", None) not in ["DELIVERY", "ADMIN"] and not user.is_staff:
             return Response({"error": "Permission denied"}, status=403)
 
-        # ── INPUT CHECK ───────────────────────────────────────
         otp_input = request.data.get("otp")
 
         if not otp_input:
             return Response({"error": "OTP is required"}, status=400)
 
-        # ── FETCH FROM CACHE ──────────────────────────────────
         cached_otp = cache.get(f"delivery_otp:{pk}")
 
         if not cached_otp:
             return Response({"error": "OTP expired or not sent yet"}, status=400)
 
-        # ── COMPARE ───────────────────────────────────────────
         if str(cached_otp) != str(otp_input):
             return Response({"error": "Invalid OTP"}, status=400)
 
-        # ── SUCCESS — delete so it can't be reused ────────────
         cache.delete(f"delivery_otp:{pk}")
 
         return Response({"message": "OTP verified successfully"}, status=200)
-    
+
+
 class ValidateOrderView(APIView):
-    """
-    Validates location, pincode, and stock WITHOUT creating any order.
-    Frontend calls this before opening Razorpay.
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -449,3 +433,26 @@ class ValidateOrderView(APIView):
             return Response({"valid": True}, status=200)
 
         return Response(serializer.errors, status=400)
+
+
+# 👇 NEW — delivery slots view
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_delivery_slots(request):
+    """
+    Returns available 30-min slots for the next 7 days.
+    GET /api/orders/slots/
+    """
+    slots_by_date = []
+    today = date.today()
+
+    for i in range(7):
+        target_date = today + timedelta(days=i)
+        slots_by_date.append({
+            "date":     target_date.isoformat(),
+            "day":      target_date.strftime("%A"),
+            "is_today": target_date == today,
+            "slots":    generate_slots(target_date),
+        })
+
+    return Response(slots_by_date)

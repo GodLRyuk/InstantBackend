@@ -10,6 +10,7 @@ from promotions.models import Coupon, CouponUsage, DeliveryPass
 from promotions.models import DeliverySettings
 import razorpay
 from addresses.models import Address
+from datetime import date as date_type  # 👈 add this import
 
 
 client = razorpay.Client(auth=("rzp_test_StsVgck8iNAA8a", "2950kn0jDNssYM656rGoJAt3"))
@@ -56,7 +57,11 @@ class OrderSerializer(serializers.ModelSerializer):
             'items',
             'razorpay_order_id',
             'razorpay_payment_id',
-            'address'
+            'address',
+            'delivery_type',           # 👈 add
+            'scheduled_date',          # 👈 add
+            'scheduled_slot_start',    # 👈 add
+            'scheduled_slot_end',      # 👈 add
         ]
 
     def get_address(self, obj):
@@ -77,6 +82,10 @@ class CreateOrderSerializer(serializers.Serializer):
     payment_method = serializers.CharField(required=True)
     current_lat = serializers.FloatField(required=True)
     current_lng = serializers.FloatField(required=True)
+    delivery_type        = serializers.ChoiceField(choices=["ASAP", "SCHEDULED"], default="ASAP")
+    scheduled_date       = serializers.DateField(required=False, allow_null=True)
+    scheduled_slot_start = serializers.TimeField(required=False, allow_null=True)
+    scheduled_slot_end   = serializers.TimeField(required=False, allow_null=True)
 
     ALLOWED_PINCODES = [
         "741121",
@@ -106,6 +115,26 @@ class CreateOrderSerializer(serializers.Serializer):
             })
 
         data['items'] = validated_items
+
+        # 👇 SCHEDULING VALIDATION — added here at end of validate()
+        if data.get("delivery_type") == "SCHEDULED":
+            if not data.get("scheduled_date"):
+                raise serializers.ValidationError(
+                    "scheduled_date is required for scheduled delivery."
+                )
+            if not data.get("scheduled_slot_start"):
+                raise serializers.ValidationError(
+                    "scheduled_slot_start is required for scheduled delivery."
+                )
+            if not data.get("scheduled_slot_end"):
+                raise serializers.ValidationError(
+                    "scheduled_slot_end is required for scheduled delivery."
+                )
+            if data["scheduled_date"] < date_type.today():
+                raise serializers.ValidationError(
+                    "scheduled_date cannot be in the past."
+                )
+
         return data
 
     @transaction.atomic
@@ -118,12 +147,18 @@ class CreateOrderSerializer(serializers.Serializer):
         current_lat = validated_data.get('current_lat')
         current_lng = validated_data.get('current_lng')
 
+        # 👇 extract scheduling fields
+        delivery_type        = validated_data.get('delivery_type', 'ASAP')
+        scheduled_date       = validated_data.get('scheduled_date')
+        scheduled_slot_start = validated_data.get('scheduled_slot_start')
+        scheduled_slot_end   = validated_data.get('scheduled_slot_end')
+
         # ---------------- LOAD SETTINGS FROM DB ----------------
         config = DeliverySettings.get()
 
-        DELIVERY_FEE        = config.delivery_fee        # e.g. ₹40
-        MIN_ORDER_DELIVERY  = config.free_delivery_min   # e.g. ₹149
-        MIN_ORDER_COUPON    = config.coupon_unlock_min   # e.g. ₹299
+        DELIVERY_FEE        = config.delivery_fee
+        MIN_ORDER_DELIVERY  = config.free_delivery_min
+        MIN_ORDER_COUPON    = config.coupon_unlock_min
 
         # ---------------- ADDRESS ----------------
         try:
@@ -158,7 +193,7 @@ class CreateOrderSerializer(serializers.Serializer):
                 "location": location_check["error"]
             })
 
-        # ---------------- TOTAL CALC (subtotal only) ----------------
+        # ---------------- TOTAL CALC ----------------
         subtotal = 0
         order_items = []
 
@@ -175,44 +210,38 @@ class CreateOrderSerializer(serializers.Serializer):
             })
 
         # ---------------- DELIVERY FEE ----------------
-        delivery_fee = DELIVERY_FEE  # default — always charge unless pass qualifies
+        delivery_fee = DELIVERY_FEE
 
         delivery_pass = getattr(user, 'delivery_pass', None)
         pass_active = delivery_pass and delivery_pass.is_valid()
 
         if pass_active:
             if subtotal >= MIN_ORDER_DELIVERY:
-                # pass qualifies — check monthly cap
                 if delivery_pass.can_use_free_delivery():
-                    delivery_fee = 0                    # ✅ free delivery
-                    delivery_pass.use_free_delivery()   # increment monthly counter
+                    delivery_fee = 0
+                    delivery_pass.use_free_delivery()
                 else:
-                    # cap hit for this month
                     raise serializers.ValidationError(
                         "You've used all 20 free deliveries this month. "
                         "Free deliveries reset on the 1st of next month."
                     )
-            # subtotal < MIN_ORDER_DELIVERY → charge normal fee, no error
 
         # ---------------- COUPON ----------------
         discount_amount = 0
         applied_coupon = None
 
         if coupon_code:
-            # Gate 1 — members only
             if not pass_active:
                 raise serializers.ValidationError(
                     "Coupons are available for Pass members only."
                 )
 
-            # Gate 2 — subtotal must reach unlock threshold
             if subtotal < MIN_ORDER_COUPON:
                 shortage = MIN_ORDER_COUPON - subtotal
                 raise serializers.ValidationError(
                     f"Add items worth ₹{shortage:.0f} more to unlock coupons."
                 )
 
-            # Gate 3 — coupon exists, active, not expired
             try:
                 applied_coupon = Coupon.objects.get(code=coupon_code)
             except Coupon.DoesNotExist:
@@ -223,13 +252,11 @@ class CreateOrderSerializer(serializers.Serializer):
                     "This coupon has expired or is inactive."
                 )
 
-            # Gate 4 — coupon's own min order (against subtotal)
             if subtotal < float(applied_coupon.min_order_amount):
                 raise serializers.ValidationError(
                     f"This coupon requires a minimum order of ₹{applied_coupon.min_order_amount}."
                 )
 
-            # Gate 5 — one-time use check
             if applied_coupon.one_time_per_user:
                 already_used = CouponUsage.objects.filter(
                     coupon=applied_coupon, user=user
@@ -239,11 +266,9 @@ class CreateOrderSerializer(serializers.Serializer):
                         "You have already used this coupon."
                     )
 
-            # ✅ All gates passed — calculate discount on subtotal
             discount_amount = applied_coupon.calculate_discount(float(subtotal))
 
         # ---------------- FINAL TOTAL ----------------
-        # subtotal - coupon discount + delivery fee
         total_amount = subtotal - discount_amount + delivery_fee
 
         # ---------------- CREATE ORDER ----------------
@@ -252,10 +277,14 @@ class CreateOrderSerializer(serializers.Serializer):
             total_amount=total_amount,
             coupon=applied_coupon,
             discount_amount=discount_amount,
-            delivery_fee=delivery_fee,          # ← store delivery fee on order
+            delivery_fee=delivery_fee,
             payment_status="PENDING",
             payment_method=payment_method,
-            address_snapshot=address_snapshot
+            address_snapshot=address_snapshot,
+            delivery_type=delivery_type,                # 👈 add
+            scheduled_date=scheduled_date,              # 👈 add
+            scheduled_slot_start=scheduled_slot_start,  # 👈 add
+            scheduled_slot_end=scheduled_slot_end,      # 👈 add
         )
 
         # ---------------- ORDER ITEMS + STOCK ----------------
@@ -265,7 +294,7 @@ class CreateOrderSerializer(serializers.Serializer):
             batch = (
                 StockBatch.objects
                 .filter(product=item['product'], quantity__gte=item['quantity'])
-                .order_by('created_at')   # oldest first (FIFO)
+                .order_by('created_at')
                 .first()
             )
 
@@ -278,12 +307,10 @@ class CreateOrderSerializer(serializers.Serializer):
                 batch=batch,
             )
 
-            # Deduct from batch
             if batch:
                 batch.quantity -= item['quantity']
                 batch.save()
 
-            # Deduct from inventory
             inventory = item['product'].inventory
 
             if inventory.total_stock < item['quantity']:
@@ -332,8 +359,11 @@ class CreateOrderSerializer(serializers.Serializer):
             "order_status": order.order_status,
             "pass_used": pass_active and delivery_fee == 0,
             "coupon_applied": applied_coupon.code if applied_coupon else None,
+            "delivery_type": delivery_type,                          # 👈 add
+            "scheduled_date": str(scheduled_date) if scheduled_date else None,        # 👈 add
+            "scheduled_slot": f"{scheduled_slot_start}–{scheduled_slot_end}" if scheduled_slot_start else None,  # 👈 add
         }
-    
+
 
 class ValidateOrderSerializer(serializers.Serializer):
     """
