@@ -1,6 +1,6 @@
 # orders/tasks.py
 
-from config.celery import shared_task
+from celery import shared_task
 from django.utils import timezone
 
 
