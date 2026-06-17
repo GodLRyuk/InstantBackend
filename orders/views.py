@@ -156,7 +156,7 @@ class CreateOrderView(CreateAPIView):
                     order.scheduled_slot_start
                 )
                 slot_start_ist = IST.localize(slot_start)
-                assign_at = slot_start_ist - timedelta(minutes=15)
+                assign_at = slot_start_ist - timedelta(minutes=2)
 
                 assign_driver_for_scheduled_order.apply_async(
                     args=[order.id],
