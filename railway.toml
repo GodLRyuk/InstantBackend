@@ -1,2 +1,2 @@
 [deploy]
-startCommand = "python manage.py migrate && supervisord -c supervisord.conf"
+startCommand = "python manage.py migrate && supervisord -c supervisord.conf & sleep 8 && cat /tmp/celery.err.log"
