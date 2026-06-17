@@ -1,2 +1,2 @@
 [deploy]
-startCommand = "python manage.py migrate && supervisord -c supervisord.conf"
+startCommand = "python manage.py migrate && /app/.venv/bin/celery -A config worker --loglevel=debug"
