@@ -3,7 +3,7 @@ from datetime import date, time, datetime, timedelta
 SLOT_START_HOUR = 9   # 9 AM
 SLOT_END_HOUR   = 22  # 10 PM
 SLOT_DURATION   = 15  # minutes
-BUFFER_MINUTES  = 60  # don't allow slots within 60 min of now
+BUFFER_MINUTES  = 15  # don't allow slots within 15 min of now
 
 
 def generate_slots(for_date: date) -> list[dict]:
