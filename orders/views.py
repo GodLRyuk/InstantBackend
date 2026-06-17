@@ -119,30 +119,55 @@ class CreateOrderView(CreateAPIView):
             order_id = data.get('order_id') or data.get('id')
             order = Order.objects.get(id=order_id)
 
-            existing = DeliveryAssignment.objects.filter(order=order).first()
-            if not existing:
-                driver = assign_driver(order)
-                if driver:
-                    assignment = DeliveryAssignment.objects.create(
-                        order=order,
-                        driver=driver,
-                        status="ASSIGNED"
-                    )
-                    notify_driver(driver.id, {
-                        "order_id": order.id,
-                        "order_status": order.order_status,
-                        "payment_status": order.payment_status,
-                        "total_amount": float(order.total_amount),
-                        "customer_name": order.user.first_name+" "+order.user.middle_name+" "+order.user.last_name,
-                        "customer_phone": order.user.phone,
-                        "address": order.address_snapshot,
-                        "assigned_at": str(assignment.assigned_at),
-                        "status": assignment.status,
-                    })
-                    print(f'📤 Auto assigned driver {driver.id} to order {order.id}')
+            # ── ASAP: assign driver immediately ──────────────────
+            # ── SCHEDULED: skip now, celery will assign later ────
+            if order.delivery_type == "ASAP":
+                existing = DeliveryAssignment.objects.filter(order=order).first()
+                if not existing:
+                    driver = assign_driver(order)
+                    if driver:
+                        assignment = DeliveryAssignment.objects.create(
+                            order=order,
+                            driver=driver,
+                            status="ASSIGNED"
+                        )
+                        notify_driver(driver.id, {
+                            "order_id": order.id,
+                            "order_status": order.order_status,
+                            "payment_status": order.payment_status,
+                            "total_amount": float(order.total_amount),
+                            "customer_name": order.user.first_name + " " + order.user.middle_name + " " + order.user.last_name,
+                            "customer_phone": order.user.phone,
+                            "address": order.address_snapshot,
+                            "assigned_at": str(assignment.assigned_at),
+                            "status": assignment.status,
+                        })
+            else:
+                # SCHEDULED — queue a delayed task
+                from orders.tasks import assign_driver_for_scheduled_order
+                from datetime import datetime, timedelta
+                import pytz
+
+                IST = pytz.timezone("Asia/Kolkata")
+
+                # Assign driver 30 mins before the slot starts
+                slot_start = datetime.combine(
+                    order.scheduled_date,
+                    order.scheduled_slot_start
+                )
+                slot_start_ist = IST.localize(slot_start)
+                assign_at = slot_start_ist - timedelta(minutes=30)
+
+                assign_driver_for_scheduled_order.apply_async(
+                    args=[order.id],
+                    eta=assign_at,
+                )
+                print(f"✅ Scheduled driver assignment queued for order #{order.id} at {assign_at}")
+
         except Exception as e:
             print(f'⚠️ Auto assign failed: {e}')
 
+        # coupon usage recording (unchanged)
         try:
             coupon_code = request.data.get("coupon_code", "").strip().upper()
             if coupon_code:
