@@ -133,7 +133,7 @@ class CreateOrderView(CreateAPIView):
                         )
                         notify_driver(driver.id, {
                             "order_id": order.id,
-                            "order_status": order.order_status,
+                            "order_status": "CONFIRMED",
                             "payment_status": order.payment_status,
                             "total_amount": float(order.total_amount),
                             "customer_name": order.user.first_name + " " + order.user.middle_name + " " + order.user.last_name,
@@ -243,7 +243,7 @@ class AutoAssignDriverAPIView(APIView):
         if existing:
             notify_driver(existing.driver.id, {
                 "order_id": order.id,
-                "order_status": order.order_status,
+                "order_status": "CONFIRMED",
                 "payment_status": order.payment_status,
                 "total_amount": float(order.total_amount),
                 "customer_name": order.user.first_name+" "+order.user.middle_name+" "+order.user.last_name,
