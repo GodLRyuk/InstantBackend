@@ -25,8 +25,8 @@ def generate_slots(for_date: date) -> list[dict]:
             available = False
 
         slots.append({
-            "slot_start": current.strftime("%I:%M %p"),
-            "slot_end":   slot_end.strftime("%I:%M %p"),
+            "slot_start": current.strftime("%H:%M:%S"),
+            "slot_end":   slot_end.strftime("%H:%M:%S"),
             "available":  available,
         })
         current = slot_end
