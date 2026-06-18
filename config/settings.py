@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 from datetime import timedelta
 import os
+import ssl
 
 import dj_database_url
 
@@ -143,7 +144,7 @@ CHANNEL_LAYERS = {
         "CONFIG": {
             "hosts": [{
                 "address": REDIS_URL,
-                "ssl_cert_reqs": None,  # ✅ goes inside host dict, not config
+                "ssl_cert_reqs": ssl.CERT_NONE,  # ✅ goes inside host dict, not config
             }],
         },
     },
@@ -199,10 +200,13 @@ REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
 
-# Railway uses rediss:// (SSL) — Celery needs ssl_cert_reqs explicitly set
 if REDIS_URL.startswith('rediss://'):
-    CELERY_BROKER_USE_SSL = {'ssl_cert_reqs': 'CERT_NONE'}
-    CELERY_REDIS_BACKEND_USE_SSL = {'ssl_cert_reqs': 'CERT_NONE'}
+    CELERY_BROKER_USE_SSL = {
+        'ssl_cert_reqs': ssl.CERT_NONE  # ✅ actual constant, not string
+    }
+    CELERY_REDIS_BACKEND_USE_SSL = {
+        'ssl_cert_reqs': ssl.CERT_NONE  # ✅ actual constant, not string
+    }
 
 CELERY_TIMEZONE = 'Asia/Kolkata'
 CELERY_ENABLE_UTC = True
