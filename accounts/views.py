@@ -96,7 +96,7 @@ class RegisterAPIView(APIView):
             password=password,
             phone=phone,
             address=address,
-            zip_code=zip_code
+            zip_code=zip_code,
             role=role
         )
 

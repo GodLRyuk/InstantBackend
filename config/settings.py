@@ -196,22 +196,3 @@ RAZORPAY_SECRET = os.environ.get('RAZORPAY_SECRET')
 
 # ── CELERY ────────────────────────────────────────────────
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')
-
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
-
-if REDIS_URL.startswith('rediss://'):
-    CELERY_BROKER_USE_SSL = {
-        'ssl_cert_reqs': ssl.CERT_NONE  # ✅ actual constant, not string
-    }
-    CELERY_REDIS_BACKEND_USE_SSL = {
-        'ssl_cert_reqs': ssl.CERT_NONE  # ✅ actual constant, not string
-    }
-
-CELERY_TIMEZONE = 'Asia/Kolkata'
-CELERY_ENABLE_UTC = True
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TASK_ACKS_LATE = True
-CELERY_WORKER_PREFETCH_MULTIPLIER = 1

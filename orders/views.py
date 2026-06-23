@@ -143,26 +143,7 @@ class CreateOrderView(CreateAPIView):
                             "status": assignment.status,
                         })
             else:
-                # SCHEDULED — queue a delayed task
-                from orders.tasks import assign_driver_for_scheduled_order
-                from datetime import datetime, timedelta
-                import pytz
-
-                IST = pytz.timezone("Asia/Kolkata")
-
-                # Assign driver 30 mins before the slot starts
-                slot_start = datetime.combine(
-                    order.scheduled_date,
-                    order.scheduled_slot_start
-                )
-                slot_start_ist = IST.localize(slot_start)
-                assign_at = slot_start_ist - timedelta(minutes=2)
-
-                assign_driver_for_scheduled_order.apply_async(
-                    args=[order.id],
-                    eta=assign_at,
-                )
-                print(f"✅ Scheduled driver assignment queued for order #{order.id} at {assign_at}")
+                print(f"✅ Scheduled order #{order.id} created — driver to be assigned manually")
 
         except Exception as e:
             print(f'⚠️ Auto assign failed: {e}')
