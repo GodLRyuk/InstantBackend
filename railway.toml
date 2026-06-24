@@ -1,2 +1,2 @@
 [deploy]
-startCommand = "python manage.py migrate && supervisord -c supervisord.conf"
+startCommand = "python manage.py migrate && daphne -b 0.0.0.0 -p 8080 config.asgi:application"
