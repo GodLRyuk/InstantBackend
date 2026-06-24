@@ -1,3 +1,5 @@
+from itertools import product
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -107,10 +109,11 @@ class RemoveFromCartView(APIView):
         # ✅ SAFE inventory access
         try:
             inventory = product.inventory
-        except:
-            return Response({
-                "error": "Inventory not found for this product"
-            }, status=500)
+        except Exception:
+            return Response(
+                {"error": "This product is currently unavailable."},
+                status=400
+            )
 
         # ✅ update reserved stock
         inventory.reserved_stock -= cart_item.quantity
