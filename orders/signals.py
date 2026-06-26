@@ -35,20 +35,27 @@ def schedule_driver_assignment(sender, instance, created, **kwargs):
 def order_status_notification(sender, instance, created, **kwargs):
     if created:
         send_order_notification(
-            user=instance.user,          # ✅ fix: use instance.user not instance.customer
+            user=instance.user,          
             title="Order Placed! 🎉",
             body="Your order has been confirmed and is being prepared.",
             data={"type": "order_placed", "order_id": str(instance.id)}
         )
     else:
-        status = instance.order_status   # ✅ fix: was instance.status
+        status = instance.order_status   
 
-        if status == 'OUT_FOR_DELIVERY':
+        if status == 'CONFIRMED':
             send_order_notification(
                 user=instance.user,
-                title="Your order is on the way 🚚",
-                body="Your order is out for delivery!",
-                data={"type": "order_on_the_way", "order_id": str(instance.id)}
+                title="Your order is confirmed! 🕒",
+                body="Your order has been confirmed and is being prepared.",
+                data={"type": "order_confirmed", "order_id": str(instance.id)}
+            )
+        elif status == 'SHIPPED':
+            send_order_notification(
+                user=instance.user,
+                title="Order Shipped! 🚚",
+                body="Your order has been shipped and is on its way!",
+                data={"type": "order_shipped", "order_id": str(instance.id)}
             )
         elif status == 'DELIVERED':
             send_order_notification(
@@ -61,6 +68,6 @@ def order_status_notification(sender, instance, created, **kwargs):
             send_order_notification(
                 user=instance.user,
                 title="Order Cancelled ❌",
-                body="Your order has been cancelled.",
+                body="Your order has been cancelled. Please contact support for more info.",
                 data={"type": "order_cancelled", "order_id": str(instance.id)}
             )
