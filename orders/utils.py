@@ -1,4 +1,7 @@
 # orders/utils.py
+import json
+import os
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django_extensions import settings
@@ -19,10 +22,17 @@ def notify_driver(driver_id, order_data):
     print(f'📤 Notified driver {driver_id} about order {order_data["order_id"]}')
 
 def get_firebase_app():
-    """Initialize Firebase lazily — only when first notification is sent."""
     if not firebase_admin._apps:
-        from django.conf import settings
-        cred = fb_credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_PATH)
+        json_str = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON')
+        if json_str:
+            # Production: read from environment variable
+            service_account_info = json.loads(json_str)
+            cred = fb_credentials.Certificate(service_account_info)
+        else:
+            # Local: read from file
+            from django.conf import settings
+            cred = fb_credentials.Certificate(str(settings.FIREBASE_SERVICE_ACCOUNT_PATH))
+        
         firebase_admin.initialize_app(cred)
 
 def send_order_notification(user, title: str, body: str, data: dict = {}):
