@@ -18,38 +18,37 @@ class AddToCartView(APIView):
         product = Product.objects.get(id=product_id)
         inventory = product.inventory
 
-        # ✅ Check available stock
-        if quantity > inventory.available_stock():
-            return Response(
-                {"error": "Not enough stock available"},
-                status=400
-            )
-
-        cart, created = Cart.objects.get_or_create(user=user)
-
+        cart, _ = Cart.objects.get_or_create(user=user)
         cart_item, created = CartItem.objects.get_or_create(
             cart=cart,
             product=product
         )
 
-        # ✅ If item already in cart
-        if not created:
+        if created:
+            # New item — check raw available stock
+            if quantity > inventory.available_stock():
+                cart_item.delete()  # clean up the just-created empty item
+                return Response(
+                    {"error": "Not enough stock available"},
+                    status=400
+                )
+            cart_item.quantity = quantity
+        else:
+            # Existing item — add back what's already reserved for this cart item
+            # because available_stock() has already subtracted it
+            effective_available = inventory.available_stock() + cart_item.quantity
             new_quantity = cart_item.quantity + quantity
 
-            old_quantity = cart_item.quantity if not created else 0
-
-            available_stock = inventory.available_stock() + old_quantity
-
-            if new_quantity > available_stock:
-                return Response({"error": "Stock limit exceeded"}, status=400)
-
+            if new_quantity > effective_available:
+                return Response(
+                    {"error": "Stock limit exceeded"},
+                    status=400
+                )
             cart_item.quantity = new_quantity
-        else:
-            cart_item.quantity = quantity
 
         cart_item.save()
 
-        # ✅ Reserve stock AFTER successful cart update
+        # Reserve only the newly added quantity
         inventory.reserved_stock += quantity
         inventory.save()
 
