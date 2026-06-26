@@ -31,37 +31,35 @@ def schedule_driver_assignment(sender, instance, created, **kwargs):
         eta=eta
     )
     print(f"📅 Scheduled driver assignment for order #{instance.id} at {eta}")
-
 @receiver(post_save, sender=Order)
 def order_status_notification(sender, instance, created, **kwargs):
     if created:
         send_order_notification(
-            user=instance.customer,
+            user=instance.user,          # ✅ fix: use instance.user not instance.customer
             title="Order Placed! 🎉",
             body="Your order has been confirmed and is being prepared.",
             data={"type": "order_placed", "order_id": str(instance.id)}
         )
     else:
-        # Check what status changed to
-        status = instance.status  # adjust field name to match your model
+        status = instance.order_status   # ✅ fix: was instance.status
 
         if status == 'OUT_FOR_DELIVERY':
             send_order_notification(
-                user=instance.customer,
+                user=instance.user,
                 title="Your order is on the way 🚚",
                 body="Your order is out for delivery!",
                 data={"type": "order_on_the_way", "order_id": str(instance.id)}
             )
         elif status == 'DELIVERED':
             send_order_notification(
-                user=instance.customer,
+                user=instance.user,
                 title="Order Delivered! ✅",
                 body="Enjoy! Please rate your experience.",
                 data={"type": "order_delivered", "order_id": str(instance.id)}
             )
         elif status == 'CANCELLED':
             send_order_notification(
-                user=instance.customer,
+                user=instance.user,
                 title="Order Cancelled ❌",
                 body="Your order has been cancelled.",
                 data={"type": "order_cancelled", "order_id": str(instance.id)}
