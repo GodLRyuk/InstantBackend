@@ -1,6 +1,10 @@
 # orders/utils.py
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django_extensions import settings
+import firebase_admin
+import firebase_admin.credentials as fb_credentials
+import firebase_admin.messaging as fb_messaging
 
 def notify_driver(driver_id, order_data):
     """Call this anywhere in your views to push to driver"""
@@ -13,3 +17,42 @@ def notify_driver(driver_id, order_data):
         }
     )
     print(f'📤 Notified driver {driver_id} about order {order_data["order_id"]}')
+
+def get_firebase_app():
+    """Initialize Firebase lazily — only when first notification is sent."""
+    if not firebase_admin._apps:
+        from django.conf import settings
+        cred = fb_credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_PATH)
+        firebase_admin.initialize_app(cred)
+
+def send_order_notification(user, title: str, body: str, data: dict = {}):
+    try:
+        token = getattr(user, 'fcm_token', None)
+        if not token:
+            print(f"No FCM token for user {user.id}")
+            return
+
+        get_firebase_app()  # ✅ initialize here, not at import time
+
+        str_data = {k: str(v) for k, v in data.items()}
+
+        message = fb_messaging.Message(
+            notification=fb_messaging.Notification(
+                title=title,
+                body=body,
+            ),
+            data=str_data,
+            token=token,
+            android=fb_messaging.AndroidConfig(priority='high'),
+            apns=fb_messaging.APNSConfig(
+                payload=fb_messaging.APNSPayload(
+                    aps=fb_messaging.Aps(sound='default')
+                )
+            )
+        )
+
+        response = fb_messaging.send(message)
+        print(f"Notification sent to user {user.id}: {response}")
+
+    except Exception as e:
+        print(f"Failed to send notification to user {user.id}: {e}")

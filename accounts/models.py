@@ -24,6 +24,7 @@ class User(AbstractUser):
     is_online = models.BooleanField(default=False)
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
+    fcm_token = models.CharField(max_length=255, blank=True, null=True)
 
     def __str__(self):
         return self.username

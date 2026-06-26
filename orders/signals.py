@@ -3,6 +3,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 import datetime
 from .models import Order
+from .utils import send_order_notification
 
 @receiver(post_save, sender=Order)
 def schedule_driver_assignment(sender, instance, created, **kwargs):
@@ -30,3 +31,38 @@ def schedule_driver_assignment(sender, instance, created, **kwargs):
         eta=eta
     )
     print(f"📅 Scheduled driver assignment for order #{instance.id} at {eta}")
+
+@receiver(post_save, sender=Order)
+def order_status_notification(sender, instance, created, **kwargs):
+    if created:
+        send_order_notification(
+            user=instance.customer,
+            title="Order Placed! 🎉",
+            body="Your order has been confirmed and is being prepared.",
+            data={"type": "order_placed", "order_id": str(instance.id)}
+        )
+    else:
+        # Check what status changed to
+        status = instance.status  # adjust field name to match your model
+
+        if status == 'OUT_FOR_DELIVERY':
+            send_order_notification(
+                user=instance.customer,
+                title="Your order is on the way 🚚",
+                body="Your order is out for delivery!",
+                data={"type": "order_on_the_way", "order_id": str(instance.id)}
+            )
+        elif status == 'DELIVERED':
+            send_order_notification(
+                user=instance.customer,
+                title="Order Delivered! ✅",
+                body="Enjoy! Please rate your experience.",
+                data={"type": "order_delivered", "order_id": str(instance.id)}
+            )
+        elif status == 'CANCELLED':
+            send_order_notification(
+                user=instance.customer,
+                title="Order Cancelled ❌",
+                body="Your order has been cancelled.",
+                data={"type": "order_cancelled", "order_id": str(instance.id)}
+            )

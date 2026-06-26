@@ -196,3 +196,5 @@ RAZORPAY_SECRET = os.environ.get('RAZORPAY_SECRET')
 
 # ── CELERY ────────────────────────────────────────────────
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')
+
+FIREBASE_SERVICE_ACCOUNT_PATH = BASE_DIR / 'serviceAccountKey.json'
