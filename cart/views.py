@@ -54,7 +54,7 @@ class ViewCartView(APIView):
                 "quantity": item.quantity,
                 "price": price,
                 "total": item_total,
-                "available_stock": inventory.available_stock(),
+                "total_stock": inventory.total_stock,
                 "image": request.build_absolute_uri(product.image.url) if product.image else None
             })
 
