@@ -25,32 +25,11 @@ class AddToCartView(APIView):
         )
 
         if created:
-            # New item — check raw available stock
-            if quantity > inventory.available_stock():
-                cart_item.delete()  # clean up the just-created empty item
-                return Response(
-                    {"error": "Not enough stock available"},
-                    status=400
-                )
             cart_item.quantity = quantity
         else:
-            # Existing item — add back what's already reserved for this cart item
-            # because available_stock() has already subtracted it
-            effective_available = inventory.available_stock() + cart_item.quantity
-            new_quantity = cart_item.quantity + quantity
-
-            if new_quantity > effective_available:
-                return Response(
-                    {"error": "Stock limit exceeded"},
-                    status=400
-                )
-            cart_item.quantity = new_quantity
+            cart_item.quantity = cart_item.quantity + quantity
 
         cart_item.save()
-
-        # Reserve only the newly added quantity
-        inventory.reserved_stock += quantity
-        inventory.save()
 
         return Response({"message": "Product added to cart"})
 class ViewCartView(APIView):
@@ -103,33 +82,11 @@ class RemoveFromCartView(APIView):
         except CartItem.DoesNotExist:
             return Response({"error": "Item not in cart"}, status=404)
 
-        product = cart_item.product
-
-        # ✅ SAFE inventory access
-        try:
-            inventory = product.inventory
-        except Exception:
-            return Response(
-                {"error": "This product is currently unavailable."},
-                status=400
-            )
-
-        # ✅ update reserved stock
-        inventory.reserved_stock -= cart_item.quantity
-
-        # safety check
-        if inventory.reserved_stock < 0:
-            inventory.reserved_stock = 0
-
-        inventory.save()
-
-        # ✅ delete cart item
         cart_item.delete()
 
         return Response({
             "success": True,
             "message": "Item removed from cart",
-            "available_stock": inventory.available_stock()
         })
 class UpdateCartQuantityView(APIView):
     permission_classes = [IsAuthenticated]
@@ -150,19 +107,6 @@ class UpdateCartQuantityView(APIView):
         except CartItem.DoesNotExist:
             return Response({"error": "Item not found"}, status=404)
 
-        product = cart_item.product
-        inventory = product.inventory
-
-        old_qty = cart_item.quantity
-        available_stock = inventory.available_stock() + old_qty
-
-        if quantity > available_stock:
-            return Response({"error": "Stock limit exceeded"}, status=400)
-
-        # ✅ adjust reserved stock
-        inventory.reserved_stock = inventory.reserved_stock - old_qty + quantity
-        inventory.save()
-
         cart_item.quantity = quantity
         cart_item.save()
 
@@ -170,3 +114,35 @@ class UpdateCartQuantityView(APIView):
             "success": True,
             "message": "Cart updated"
         })
+    
+class CheckoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        cart = Cart.objects.get(user=request.user)
+        items = cart.items.select_related('product__inventory').all()
+
+        # ✅ Validate all items before doing anything
+        errors = []
+        for item in items:
+            available = item.product.inventory.total_stock
+            if item.quantity > available:
+                errors.append({
+                    "product": item.product.name,
+                    "requested": item.quantity,
+                    "available": available,
+                })
+
+        if errors:
+            return Response({
+                "error": "Some items are out of stock",
+                "items": errors
+            }, status=400)
+
+        # ✅ All good — deduct stock and place order
+        for item in items:
+            inventory = item.product.inventory
+            inventory.total_stock -= item.quantity
+            inventory.save()
+
+        # ... create order, payment etc.
