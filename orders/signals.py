@@ -5,6 +5,8 @@ from django.utils import timezone
 import datetime
 from .models import Order
 from .utils import send_order_notification
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 
 @receiver(post_save, sender=Order)
 def schedule_driver_assignment(sender, instance, created, **kwargs):
