@@ -16,6 +16,8 @@ class Order(models.Model):
     razorpay_payment_id = models.CharField(max_length=255, null=True, blank=True)
     razorpay_signature = models.TextField(null=True, blank=True)
     payment_method = models.CharField(max_length=20, default="RAZORPAY")
+    driver_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    driver_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
 
     # Payment status
     PAYMENT_STATUS_CHOICES = [

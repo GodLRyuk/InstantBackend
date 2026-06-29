@@ -1,3 +1,4 @@
+from channels.layers import get_channel_layer
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -33,29 +34,34 @@ def schedule_driver_assignment(sender, instance, created, **kwargs):
     print(f"📅 Scheduled driver assignment for order #{instance.id} at {eta}")
 @receiver(post_save, sender=Order)
 def order_status_notification(sender, instance, created, **kwargs):
+    channel_layer = get_channel_layer()
+
     if created:
         send_order_notification(
-            user=instance.user,          
+            user=instance.user,
             title="Order Placed! 🎉",
-            body="Your order has been confirmed and is being prepared.",
+            body="Your order has been confirmed!",
             data={"type": "order_placed", "order_id": str(instance.id)}
         )
     else:
-        status = instance.order_status   
+        status = instance.order_status
 
-        if status == 'CONFIRMED':
+        # ✅ Push status update via WebSocket to customer tracking screen
+        async_to_sync(channel_layer.group_send)(
+            f'order_{instance.id}',
+            {
+                'type': 'order_status_update',
+                'status': status,
+            }
+        )
+
+        # Push notification as before
+        if status == 'OUT_FOR_DELIVERY':
             send_order_notification(
                 user=instance.user,
-                title="Your order is confirmed! 🕒",
-                body="Your order has been confirmed and is being prepared.",
-                data={"type": "order_confirmed", "order_id": str(instance.id)}
-            )
-        elif status == 'SHIPPED':
-            send_order_notification(
-                user=instance.user,
-                title="Order Shipped! 🚚",
-                body="Your order has been shipped and is on its way!",
-                data={"type": "order_shipped", "order_id": str(instance.id)}
+                title="Your order is on the way 🚚",
+                body="Your order is out for delivery!",
+                data={"type": "order_on_the_way", "order_id": str(instance.id)}
             )
         elif status == 'DELIVERED':
             send_order_notification(
@@ -68,6 +74,6 @@ def order_status_notification(sender, instance, created, **kwargs):
             send_order_notification(
                 user=instance.user,
                 title="Order Cancelled ❌",
-                body="Your order has been cancelled. Please contact support for more info.",
+                body="Your order has been cancelled.",
                 data={"type": "order_cancelled", "order_id": str(instance.id)}
             )
