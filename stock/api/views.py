@@ -23,7 +23,7 @@ class AddStockAPIView(APIView):
             )
 
         try:
-            product = Product.objects.get(id=request.data.get("product_id"))
+            product = Product.objects.get(id=request.data.get("product"))
         except Product.DoesNotExist:
             return Response({"error": "Product not found"}, status=404)
 

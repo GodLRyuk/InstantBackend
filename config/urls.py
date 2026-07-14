@@ -34,6 +34,7 @@ urlpatterns = [
     path('api/orders/', include('orders.urls')),
     path('api/promotions/', include('promotions.urls')), 
     path('api/wishlist/', include('wishlist.urls')),
+    path('api/reports/', include('reports.urls'))
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

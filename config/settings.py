@@ -28,7 +28,6 @@ CORS_ALLOW_ALL_ORIGINS = True
 INSTALLED_APPS = [
     'daphne',
     'corsheaders',
-    'cloudinary',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -48,6 +47,7 @@ INSTALLED_APPS = [
     'addresses',
     'reviews',
     'wishlist',
+    'reports',
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
@@ -55,7 +55,7 @@ ASGI_APPLICATION = 'config.asgi.application'
 
 STORAGES = {
     "default": {
-        "BACKEND": "config.storage.CloudinaryStorage",
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",

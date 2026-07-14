@@ -10,7 +10,7 @@ from promotions.models import Coupon, CouponUsage, DeliveryPass
 from promotions.models import DeliverySettings
 import razorpay
 from addresses.models import Address
-from datetime import date as date_type  # 👈 add this import
+from datetime import date as date_type
 
 
 client = razorpay.Client(auth=("rzp_test_StsVgck8iNAA8a", "2950kn0jDNssYM656rGoJAt3"))
@@ -46,6 +46,17 @@ class OrderSerializer(serializers.ModelSerializer):
     razorpay_payment_id = serializers.CharField(read_only=True)
 
     address = serializers.SerializerMethodField()
+    driver_id = serializers.SerializerMethodField()
+
+    def get_driver_id(self, obj):
+        # ✅ Look up via DeliveryAssignment
+        from orders.models import DeliveryAssignment
+        assignment = DeliveryAssignment.objects.filter(
+            order=obj
+        ).order_by('-assigned_at').first()
+        if assignment:
+            return assignment.driver_id
+        return None
 
     class Meta:
         model = Order
@@ -62,10 +73,11 @@ class OrderSerializer(serializers.ModelSerializer):
             'razorpay_order_id',
             'razorpay_payment_id',
             'address',
-            'delivery_type',           # 👈 add
-            'scheduled_date',          # 👈 add
-            'scheduled_slot_start',    # 👈 add
-            'scheduled_slot_end',      # 👈 add
+            'delivery_type',          
+            'scheduled_date',         
+            'scheduled_slot_start',   
+            'scheduled_slot_end',     
+            'driver_id',
         ]
 
     def get_address(self, obj):
@@ -280,10 +292,10 @@ class CreateOrderSerializer(serializers.Serializer):
             payment_status="PENDING",
             payment_method=payment_method,
             address_snapshot=address_snapshot,
-            delivery_type=delivery_type,                # 👈 add
-            scheduled_date=scheduled_date,              # 👈 add
-            scheduled_slot_start=scheduled_slot_start,  # 👈 add
-            scheduled_slot_end=scheduled_slot_end,      # 👈 add
+            delivery_type=delivery_type,               
+            scheduled_date=scheduled_date,             
+            scheduled_slot_start=scheduled_slot_start, 
+            scheduled_slot_end=scheduled_slot_end,     
         )
 
         # ---------------- ORDER ITEMS + STOCK ----------------
@@ -358,9 +370,9 @@ class CreateOrderSerializer(serializers.Serializer):
             "order_status": order.order_status,
             "pass_used": pass_active and delivery_fee == 0,
             "coupon_applied": applied_coupon.code if applied_coupon else None,
-            "delivery_type": delivery_type,                          # 👈 add
-            "scheduled_date": str(scheduled_date) if scheduled_date else None,        # 👈 add
-            "scheduled_slot": f"{scheduled_slot_start}–{scheduled_slot_end}" if scheduled_slot_start else None,  # 👈 add
+            "delivery_type": delivery_type,                         
+            "scheduled_date": str(scheduled_date) if scheduled_date else None,       
+            "scheduled_slot": f"{scheduled_slot_start}–{scheduled_slot_end}" if scheduled_slot_start else None, 
         }
 
 
