@@ -104,6 +104,10 @@ class DeliverySettings(models.Model):
     free_delivery_cap_monthly = models.PositiveIntegerField(default=8)  
     free_delivery_cap_yearly  = models.PositiveIntegerField(default=20) 
     free_delivery_cap   = models.PositiveIntegerField(default=20)
+    
+    base_delivery_fee = models.DecimalField(max_digits=6, decimal_places=2, default=25)
+    base_delivery_km  = models.DecimalField(max_digits=5, decimal_places=2, default=3)
+    per_km_charge     = models.DecimalField(max_digits=6, decimal_places=2, default=5)
 
     class Meta:
         verbose_name = "Delivery Settings"

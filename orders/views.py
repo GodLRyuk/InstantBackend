@@ -436,10 +436,27 @@ class ValidateOrderView(APIView):
         )
 
         if serializer.is_valid():
-            return Response({"valid": True}, status=200)
+            from promotions.models import DeliverySettings
+            from orders.location_utils import calculate_delivery_fee
+
+            config = DeliverySettings.get()
+            location_check = serializer.validated_data.get('_location_check', {})
+            distance_km = location_check.get('distance_km')
+
+            delivery_fee = calculate_delivery_fee(
+                distance_km,
+                config.base_delivery_fee,
+                config.base_delivery_km,
+                config.per_km_charge,
+            )
+
+            return Response({
+                "valid": True,
+                "distance_km": distance_km,
+                "delivery_fee": delivery_fee,
+            }, status=200)
 
         return Response(serializer.errors, status=400)
-
 
 # 👇 NEW — delivery slots view
 @api_view(["GET"])

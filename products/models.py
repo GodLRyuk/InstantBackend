@@ -21,11 +21,20 @@ class Product(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def current_batch(self):
+        return self.batches.filter(quantity__gt=0).order_by('created_at').first()
+
+    def current_selling_price(self):
+        batch = self.current_batch()
+        if batch:
+            return batch.selling_price
+        return self.price  
     def discounted_price(self):
+        price = self.current_selling_price()
         if self.discount_percent and self.discount_percent > 0:
-            discount_amount = (self.price * self.discount_percent) / Decimal("100")
-            return round(self.price - discount_amount, 2)
-        return self.price
+            discount_amount = (price * self.discount_percent) / Decimal("100")
+            return round(price - discount_amount, 2)
+        return price
 
     def __str__(self):
         return self.name
@@ -56,7 +65,7 @@ class Bundle(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def original_price(self):
-        return sum(p.price for p in self.products.all())
+        return sum(p.discounted_price() for p in self.products.all())
 
     def discount_percent(self):
         original = self.original_price()

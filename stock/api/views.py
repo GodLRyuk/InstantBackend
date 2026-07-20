@@ -50,9 +50,9 @@ class AddStockAPIView(APIView):
         inventory.save()
 
         # Optional: Update product selling price
-        if selling_price:
-            product.price = selling_price
-            product.save()
+        # if selling_price:
+        #     product.price = selling_price
+        #     product.save()
 
         return Response({
             "message": "Stock added successfully",

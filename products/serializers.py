@@ -121,6 +121,7 @@ class ProductListSerializer(serializers.ModelSerializer):
     
 class BundleProductSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    price = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -131,6 +132,8 @@ class BundleProductSerializer(serializers.ModelSerializer):
         if obj.image and hasattr(obj.image, 'url'):
             return request.build_absolute_uri(obj.image.url) if request else obj.image.url
         return None
+    def get_price(self, obj):   # ✅ NEW
+        return float(obj.discounted_price())
 
 
 class BundleSerializer(serializers.ModelSerializer):
