@@ -12,6 +12,7 @@ import razorpay
 from addresses.models import Address
 from datetime import date as date_type
 from django.conf import settings as django_settings
+from decimal import Decimal
 
 client = razorpay.Client(auth=(django_settings.RAZORPAY_KEY_ID, django_settings.RAZORPAY_SECRET))
 
@@ -142,7 +143,7 @@ class CreateOrderSerializer(serializers.Serializer):
             raise serializers.ValidationError({"location": location_check["error"]})
 
         # ---------------- TOTAL CALC ----------------
-        subtotal = 0
+        subtotal = Decimal("0.00")
         order_items = []
         for item in items_data:
             product = item['product']
@@ -152,12 +153,12 @@ class CreateOrderSerializer(serializers.Serializer):
 
         # ---------------- DELIVERY FEE — distance-based ----------------
         # ✅ CHANGED — was: delivery_fee = config.delivery_fee (flat)
-        delivery_fee = calculate_delivery_fee(
-            distance_km=location_check["distance_km"],
-            base_fee=config.base_delivery_fee,
-            base_km=config.base_delivery_km,
-            per_km_charge=config.per_km_charge,
-        )
+        delivery_fee = Decimal(str(calculate_delivery_fee(
+        distance_km=location_check["distance_km"],
+        base_fee=config.base_delivery_fee,
+        base_km=config.base_delivery_km,
+        per_km_charge=config.per_km_charge,
+        )))
 
         delivery_pass = getattr(user, 'delivery_pass', None)
         pass_active = delivery_pass and delivery_pass.is_valid()
@@ -165,7 +166,7 @@ class CreateOrderSerializer(serializers.Serializer):
         if pass_active:
             if subtotal >= MIN_ORDER_DELIVERY:
                 if delivery_pass.can_use_free_delivery():
-                    delivery_fee = 0
+                    delivery_fee = Decimal("0.00")
                     delivery_pass.use_free_delivery()
                 else:
                     raise serializers.ValidationError(
@@ -194,7 +195,7 @@ class CreateOrderSerializer(serializers.Serializer):
                 already_used = CouponUsage.objects.filter(coupon=applied_coupon, user=user).exists()
                 if already_used:
                     raise serializers.ValidationError("You have already used this coupon.")
-            discount_amount = applied_coupon.calculate_discount(float(subtotal))
+            discount_amount = applied_coupon.calculate_discount(subtotal)
 
         total_amount = subtotal - discount_amount + delivery_fee
 

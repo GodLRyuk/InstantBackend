@@ -12,6 +12,8 @@ class Product(models.Model):
     unit = models.ForeignKey(Unit, on_delete=models.SET_NULL, null=True)
     unit_size = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
+    barcode = models.CharField(max_length=100, blank=True, null=True, unique=True)
+
     price = models.DecimalField(max_digits=10, decimal_places=2)
     discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
 

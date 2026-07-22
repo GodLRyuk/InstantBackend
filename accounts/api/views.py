@@ -403,8 +403,11 @@ class DriverLoginAPIView(APIView):
     def get(self, request):
         user = request.user
 
-        if user.role != "DELIVERY":
-            return Response({"error": "Not a driver"}, status=403)
+        if user.role not in ("DELIVERY", "PICKUP"):
+            return Response(
+                {'error': 'Not a driver or picker account'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         is_online = request.data.get("is_online")
         return Response({
@@ -435,9 +438,9 @@ class DriverLoginAPIView(APIView):
             )
 
         # 🚚 DRIVER ROLE CHECK
-        if user.role != "DELIVERY":
+        if user.role not in ("DELIVERY", "PICKUP"):
             return Response(
-                {'error': 'Not a driver account'},
+                {'error': 'Not a driver or picker account'},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -459,8 +462,11 @@ class DriverOrderDetailAPIView(APIView):
     def get(self, request, order_id):
         user = request.user
 
-        if user.role != "DELIVERY":
-            return Response({"error": "Not a driver"}, status=403)
+        if user.role not in ("DELIVERY", "PICKUP"):
+            return Response(
+                {'error': 'Not a driver or picker account'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         try:
             order = Order.objects.select_related("user").get(id=order_id)

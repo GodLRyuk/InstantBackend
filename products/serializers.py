@@ -29,6 +29,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "price", "discount_percent",
             "discounted_price",
             "stock",
+            "barcode",
             "image", "image_url",
             "description",
             "is_active", "created_at","reviews","average_rating","review_count"
@@ -94,6 +95,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             "discount_percent",
             "discounted_price",
             "stock",
+            "barcode",
             "image",
             "description",
             "is_active",

@@ -274,8 +274,11 @@ class DriverAssignedOrdersAPIView(APIView):
     def get(self, request):
         user = request.user
 
-        if user.role != "DELIVERY":
-            return Response({"error": "Not a driver"}, status=403)
+        if user.role not in ("DELIVERY", "PICKUP"):
+            return Response(
+                {'error': 'Not a driver or picker account'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         assignments = DeliveryAssignment.objects.filter(
             driver=user

@@ -29,7 +29,8 @@ class Order(models.Model):
     # Order lifecycle status
     ORDER_STATUS_CHOICES = [
         ("PENDING", "Pending"),       # Order created, awaiting payment
-        ("CONFIRMED", "Confirmed"),   # Payment received, ready to process
+        ("CONFIRMED", "Confirmed"),
+        ("PACKED", "Packed"),   # Payment received, ready to process
         ("SHIPPED", "Shipped"),       # Order shipped to customer
         ("DELIVERED", "Delivered"),   # Order delivered successfully
         ("CANCELLED", "Cancelled"),   # Order cancelled

@@ -1,3 +1,4 @@
+from OpenSSL.rand import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -32,8 +33,11 @@ class DriverStatusAPIView(APIView):
     def get(self, request):
         user = request.user
 
-        if user.role != "DELIVERY":
-            return Response({"error": "Not a driver"}, status=403)
+        if user.role not in ("DELIVERY", "PICKUP"):
+            return Response(
+                {'error': 'Not a driver or picker account'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         today = timezone.now().date()
 
@@ -68,8 +72,11 @@ class DriverStatusAPIView(APIView):
     def post(self, request):
         user = request.user
 
-        if user.role != "DELIVERY":
-            return Response({"error": "Not a driver"}, status=403)
+        if user.role not in ("DELIVERY", "PICKUP"):
+            return Response(
+                {'error': 'Not a driver or picker account'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         is_online = request.data.get("is_online")
 
@@ -120,8 +127,11 @@ class DriverAttendanceAPIView(APIView):
     def get(self, request):
         user = request.user
 
-        if user.role != "DELIVERY":
-            return Response({"error": "Not a driver"}, status=403)
+        if user.role not in ("DELIVERY", "PICKUP"):
+            return Response(
+                {'error': 'Not a driver or picker account'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         # ✅ last 30 records
         history = DriverAttendance.objects.filter(
