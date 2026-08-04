@@ -1,8 +1,12 @@
 from django.urls import path
 from .views import (
+    AdminDriverOrdersAPIView,
+    AdminPendingSettlementsAPIView,
+    DriverPendingCashAPIView,
     OrderListView,
     OrderDetailView,
     CancelOrderView,
+    RecordRemittanceAPIView,
     UpdateOrderStatusView,
     CreateOrderView,
     ValidateOrderView,
@@ -35,4 +39,9 @@ urlpatterns = [
     path('verify-payment/', VerifyPaymentView.as_view()),
     path('driver/orders/', DriverAssignedOrdersAPIView.as_view()),
     path('admin/orders/', OrderListView.as_view()),
+
+    path('driver/cash-pending/', DriverPendingCashAPIView.as_view()),
+    path('admin/settlements/pending/', AdminPendingSettlementsAPIView.as_view()),
+    path('admin/settlements/driver/<int:driver_id>/', AdminDriverOrdersAPIView.as_view()),
+    path('admin/settlements/record/', RecordRemittanceAPIView.as_view()),
 ]

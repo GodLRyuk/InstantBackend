@@ -1,12 +1,14 @@
 # orders/views.py
 
+from django.db.models.aggregates import Count, Sum
+from django.db.models.aggregates import Count
 from rest_framework.generics import ListAPIView, RetrieveAPIView, CreateAPIView
 from rest_framework.permissions import IsAuthenticated
-from .models import Order
-from .serializers import OrderSerializer, CreateOrderSerializer, ValidateOrderSerializer
+from .models import CashRemittance, CashRemittanceItem, Order
+from .serializers import CashRemittanceSerializer, OrderSerializer, CreateOrderSerializer, ValidateOrderSerializer
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import serializers, status
 import hmac
 import hashlib
 from django.conf import settings
@@ -17,7 +19,7 @@ from django.core.mail import send_mail
 import random
 from orders.utils import notify_driver
 from promotions.models import Coupon, CouponUsage
-from datetime import date, timedelta              # 👈 add
+from datetime import date, timedelta, timezone              # 👈 add
 from orders.slot_utils import generate_slots      # 👈 add
 from rest_framework.decorators import api_view, permission_classes  # 👈 add
 
@@ -95,6 +97,9 @@ class UpdateOrderStatusView(APIView):
             order.mark_delivered()
         elif status_value == "CONFIRMED":
             order.order_status = "CONFIRMED"
+            order.save()
+        elif status_value == "PACKED":        
+            order.order_status = "PACKED"
             order.save()
         else:
             return Response({"error": "Invalid status"}, status=400)
@@ -482,3 +487,124 @@ def get_delivery_slots(request):
         })
 
     return Response(slots_by_date)
+
+
+class DriverPendingCashAPIView(APIView):
+    """Driver app: read-only view of cash still owed to the store. No actions here."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        orders = Order.objects.filter(
+            payment_method="COD", payment_status="PAID", cash_remitted=False,
+            deliveryassignment__driver=request.user
+        ).order_by('-created_at')
+
+        data = [{
+            "order_id": o.id,
+            "total_amount": o.total_amount,
+            "customer_name": o.user.username,
+            "delivered_at": o.updated_at,
+        } for o in orders]
+
+        return Response({
+            "count": len(data),
+            "total_due": sum(o.total_amount for o in orders) if orders else 0,
+            "orders": data
+        })
+
+class AdminPendingSettlementsAPIView(APIView):
+    """Admin: which drivers are holding uncleared COD cash, grouped."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response({"error": "Permission denied"}, status=403)
+
+        pending = Order.objects.filter(
+            payment_method="COD", payment_status="PAID", cash_remitted=False
+        )
+
+        grouped = (
+            pending.values('deliveryassignment__driver__id', 'deliveryassignment__driver__username')
+            .annotate(order_count=Count('id'), total_due=Sum('total_amount'))
+            .order_by('-total_due')
+        )
+
+        return Response(list(grouped))
+
+
+class AdminDriverOrdersAPIView(APIView):
+    """Admin: drill into one driver's specific uncleared orders, to select which to settle."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, driver_id):
+        if not request.user.is_staff:
+            return Response({"error": "Permission denied"}, status=403)
+
+        orders = Order.objects.filter(
+            payment_method="COD", payment_status="PAID", cash_remitted=False,
+            deliveryassignment__driver_id=driver_id
+        ).order_by('-created_at')
+
+        data = [{
+            "order_id": o.id,
+            "total_amount": o.total_amount,
+            "customer_name": o.user.username,
+            "delivered_at": o.updated_at,
+        } for o in orders]
+
+        return Response({"orders": data, "total_due": sum(o.total_amount for o in orders) if orders else 0})
+class RecordRemittanceSerializer(serializers.Serializer):
+    driver_id = serializers.IntegerField()
+    order_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
+    amount_received = serializers.DecimalField(max_digits=10, decimal_places=2)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, data):
+        qs = Order.objects.filter(
+            payment_method="COD", payment_status="PAID", cash_remitted=False,
+            deliveryassignment__driver_id=data['driver_id']
+        )
+        if data.get('order_ids'):
+            qs = qs.filter(id__in=data['order_ids'])
+
+        if not qs.exists():
+            raise serializers.ValidationError("No matching pending orders for this driver.")
+
+        data['orders'] = list(qs.distinct())
+        return data
+
+
+class RecordRemittanceAPIView(APIView):
+    """Admin: single action — cash is already in hand, record it and clear the orders."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.is_staff:
+            return Response({"error": "Permission denied"}, status=403)
+
+        serializer = RecordRemittanceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        orders = serializer.validated_data['orders']
+        amount_received = serializer.validated_data['amount_received']
+        total_amount = sum(o.total_amount for o in orders)
+
+        status_value = "CONFIRMED" if amount_received == total_amount else "DISCREPANCY"
+
+        remittance = CashRemittance.objects.create(
+            driver_id=serializer.validated_data['driver_id'],
+            total_amount=total_amount,
+            amount_received=amount_received,
+            status=status_value,
+            recorded_by=request.user,
+            notes=serializer.validated_data.get('notes', '')
+        )
+        CashRemittanceItem.objects.bulk_create([
+            CashRemittanceItem(remittance=remittance, order=o) for o in orders
+        ])
+
+        if status_value == "CONFIRMED":
+            Order.objects.filter(id__in=[o.id for o in orders]).update(cash_remitted=True)
+            # else: leave cash_remitted=False — orders stay "pending" until admin re-checks and resolves the mismatch
+
+        return Response(CashRemittanceSerializer(remittance).data, status=201)

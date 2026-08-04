@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Order, OrderItem, DeliveryAssignment
+from .models import CashRemittanceItem, Order, OrderItem, DeliveryAssignment
 
 class OrderItemInline(admin.TabularInline):
     model = OrderItem
@@ -23,3 +23,7 @@ class DeliveryAssignmentAdmin(admin.ModelAdmin):
     list_filter = ("status", "assigned_at")
     search_fields = ("order__id", "driver__username")
     readonly_fields = ("assigned_at",)
+@admin.register(CashRemittanceItem)
+class CashRemittanceItemAdmin(admin.ModelAdmin):
+    list_display = ("id", "remittance", "order")
+    search_fields = ("order__id", "remittance__id")

@@ -3,7 +3,7 @@ from rest_framework import serializers
 
 from orders.location_utils import validate_user_location, calculate_delivery_fee, ALLOWED_PINCODES  # ✅ CHANGED
 from stock.models import StockBatch
-from .models import Order, OrderItem
+from .models import CashRemittance, CashRemittanceItem, CashRemittanceItem, Order, OrderItem
 from django.db import transaction
 from products.models import Product
 from promotions.models import Coupon, CouponUsage, DeliveryPass
@@ -306,3 +306,25 @@ class ValidateOrderSerializer(serializers.Serializer):
 
         data['_location_check'] = location_check   # ✅ NEW — stash for the view to read
         return data
+class CashRemittanceItemSerializer(serializers.ModelSerializer):
+    order_id = serializers.IntegerField(source='order.id')
+    total_amount = serializers.DecimalField(source='order.total_amount', max_digits=10, decimal_places=2)
+
+    class Meta:
+        model = CashRemittanceItem
+        fields = ['order_id', 'total_amount']
+
+
+class CashRemittanceSerializer(serializers.ModelSerializer):
+    items = CashRemittanceItemSerializer(many=True, read_only=True)
+    driver_name = serializers.CharField(source='driver.username', read_only=True)
+    recorded_by_name = serializers.CharField(source='recorded_by.username', read_only=True)
+
+    class Meta:
+        model = CashRemittance
+        fields = [
+            'id', 'driver', 'driver_name', 'total_amount', 'amount_received',
+            'status', 'recorded_by', 'recorded_by_name', 'recorded_at', 'notes', 'items'
+        ]
+        read_only_fields = ['status', 'recorded_by', 'recorded_at']
+

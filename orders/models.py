@@ -18,6 +18,7 @@ class Order(models.Model):
     payment_method = models.CharField(max_length=20, default="RAZORPAY")
     driver_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     driver_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    cash_remitted = models.BooleanField(default=False)
 
     # Payment status
     PAYMENT_STATUS_CHOICES = [
@@ -150,3 +151,26 @@ class DeliveryAssignment(models.Model):
 
     def __str__(self):
         return f"{self.order_id} -> {self.driver_id}"
+class CashRemittance(models.Model):
+    STATUS_CHOICES = (
+        ("CONFIRMED", "Confirmed"),
+        ("DISCREPANCY", "Discrepancy"),
+    )
+    driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name="remittances")
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2)     # sum of selected orders
+    amount_received = models.DecimalField(max_digits=10, decimal_places=2)  # what admin actually counted
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    recorded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="recorded_remittances")
+    recorded_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"Remittance #{self.id} - {self.driver.username} - ₹{self.amount_received}"
+
+
+class CashRemittanceItem(models.Model):
+    remittance = models.ForeignKey(CashRemittance, on_delete=models.CASCADE, related_name="items")
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="remittance_items")
+
+    class Meta:
+        unique_together = ("remittance", "order")
