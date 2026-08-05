@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from orders.models import Order, OrderItem
 from stock.models import Inventory, StockBatch
 from products.models import Product
+from masters.models import Brand
 from rest_framework.permissions import IsAuthenticated
 import openpyxl
 from openpyxl.utils import get_column_letter
@@ -231,5 +232,79 @@ class SalesReportExcelAPIView(APIView):
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
         response['Content-Disposition'] = 'attachment; filename="sales_report.xlsx"'
+        wb.save(response)
+        return response
+
+
+class BrandProductsExcelAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response({"error": "Only admin can export reports"}, status=403)
+
+        brand_ids = request.query_params.get('brand_ids', '')
+        brand_names = request.query_params.get('brand_names', '')
+
+        brands = Brand.objects.filter(is_active=True)
+        if brand_ids:
+            try:
+                ids = [int(b.strip()) for b in brand_ids.split(',') if b.strip()]
+                brands = brands.filter(id__in=ids)
+            except ValueError:
+                brands = brands.none()
+        elif brand_names:
+            names = [b.strip() for b in brand_names.split(',') if b.strip()]
+            brands = brands.filter(name__in=names)
+
+        brands = brands.order_by('name')
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Products by Brand"
+
+        product_headers = [
+            "#", "Product Name"
+        ]
+
+        bold_font = openpyxl.styles.Font(bold=True)
+
+        row_index = 1
+        for brand in brands:
+            ws.append([brand.name, ""])
+            for cell in ws[row_index]:
+                cell.font = bold_font
+            row_index += 1
+
+            ws.append(product_headers)
+            for cell in ws[row_index]:
+                cell.font = bold_font
+            row_index += 1
+
+            products = brand.product_set.filter(is_active=True).order_by('name')
+
+            if products.exists():
+                counter = 1
+                for product in products:
+                    ws.append([
+                        counter,
+                        product.name,
+                    ])
+                    counter += 1
+                    row_index += 1
+            else:
+                ws.append(["No products found for this brand.", ""])
+                row_index += 1
+
+            ws.append([""] * len(product_headers))
+            row_index += 1
+
+        for i in range(1, len(product_headers) + 1):
+            ws.column_dimensions[get_column_letter(i)].width = 30
+
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="brand_products.xlsx"'
         wb.save(response)
         return response
