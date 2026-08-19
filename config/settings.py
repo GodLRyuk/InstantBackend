@@ -49,6 +49,8 @@ INSTALLED_APPS = [
     'wishlist',
     'reports',
     "store_picker",
+    "expenses",
+    "store_timing",
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
