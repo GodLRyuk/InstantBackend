@@ -183,21 +183,31 @@ class SalesReportExcelAPIView(APIView):
         ]
         ws.append(headers)
 
+        cod_total = 0.0
+        online_total = 0.0
+        grand_total = 0.0
+
         for order in qs:
             customer = order.user
             customer_name = f"{customer.first_name or ''} {customer.last_name or ''}".strip() or customer.username
             coupon_code = order.coupon.code if order.coupon else ""
 
+            order_total = float(order.total_amount)
+            grand_total += order_total
+            if order.payment_method == "COD":
+                cod_total += order_total
+            else:
+                online_total += order_total
+
             items = order.items.all()
 
             if not items:
-                # Order with no items — still show one row for visibility
                 ws.append([
                     order.id, order.created_at.strftime('%Y-%m-%d %H:%M'),
                     customer_name, customer.email, getattr(customer, 'phone', ''),
                     "", "", "", "", "",
                     float(order.discount_amount), float(order.delivery_fee), coupon_code,
-                    float(order.total_amount), order.order_status, order.payment_method,
+                    order_total, order.order_status, order.payment_method,
                 ])
                 continue
 
@@ -216,7 +226,7 @@ class SalesReportExcelAPIView(APIView):
                     float(order.discount_amount),
                     float(order.delivery_fee),
                     coupon_code,
-                    float(order.total_amount),
+                    order_total,
                     order.order_status,
                     order.payment_method,
                 ])
@@ -227,6 +237,23 @@ class SalesReportExcelAPIView(APIView):
         # Bold header row
         for cell in ws[1]:
             cell.font = openpyxl.styles.Font(bold=True)
+
+        # ── TOTALS ROWS ──────────────────────────────
+        blank_row = [""] * len(headers)
+        ws.append(blank_row)
+
+        total_row_idx = ["", "", "", "", "", "", "", "", "", "", "", "", "Grand Total", grand_total, "", ""]
+        cod_row_idx = ["", "", "", "", "", "", "", "", "", "", "", "", "COD Total", cod_total, "", ""]
+        online_row_idx = ["", "", "", "", "", "", "", "", "", "", "", "", "Online Total", online_total, "", ""]
+
+        ws.append(total_row_idx)
+        ws.append(cod_row_idx)
+        ws.append(online_row_idx)
+
+        for row in ws.iter_rows(min_row=ws.max_row - 2, max_row=ws.max_row):
+            for cell in row:
+                if cell.value not in (None, ""):
+                    cell.font = openpyxl.styles.Font(bold=True)
 
         response = HttpResponse(
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -270,6 +297,8 @@ class BrandProductsExcelAPIView(APIView):
         bold_font = openpyxl.styles.Font(bold=True)
 
         row_index = 1
+        grand_total_products = 0
+
         for brand in brands:
             ws.append([brand.name, ""])
             for cell in ws[row_index]:
@@ -282,6 +311,8 @@ class BrandProductsExcelAPIView(APIView):
             row_index += 1
 
             products = brand.product_set.filter(is_active=True).order_by('name')
+            brand_count = products.count()
+            grand_total_products += brand_count
 
             if products.exists():
                 counter = 1
@@ -296,8 +327,18 @@ class BrandProductsExcelAPIView(APIView):
                 ws.append(["No products found for this brand.", ""])
                 row_index += 1
 
+            ws.append([f"Total: {brand_count}", ""])
+            for cell in ws[row_index]:
+                cell.font = bold_font
+            row_index += 1
+
             ws.append([""] * len(product_headers))
             row_index += 1
+
+        ws.append(["Grand Total Products", grand_total_products])
+        for cell in ws[row_index]:
+            cell.font = bold_font
+        row_index += 1
 
         for i in range(1, len(product_headers) + 1):
             ws.column_dimensions[get_column_letter(i)].width = 30

@@ -1,4 +1,6 @@
 from django.urls import path
+
+from stock.views import StockAdjustmentAPIView
 from .views import AddStockAPIView, UpdateStockAPIView, StockListAPIView,DeleteStockAPIView, InventoryListAPIView
 
 urlpatterns = [
@@ -7,5 +9,6 @@ urlpatterns = [
     path('delete/<int:pk>/', DeleteStockAPIView.as_view(), name='delete-stock'),
     path('inventory/', InventoryListAPIView.as_view(), name="list-stock"),   # ✅ StockBatch data
     path('', StockListAPIView.as_view(), name="inventory-list"),     # ✅ Inventory data
+    path('adjustments/', StockAdjustmentAPIView.as_view()),
     
 ]

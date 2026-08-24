@@ -1,6 +1,5 @@
 from rest_framework import serializers
-from .models import Inventory, StockBatch  # or Stock model name
-
+from .models import Inventory, StockAdjustment, StockBatch  
 class InventorySerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     available_stock = serializers.SerializerMethodField()
@@ -51,3 +50,22 @@ class StockBatchSerializer(serializers.ModelSerializer):
             'purchase_price',
             'selling_price',
         ]
+
+class StockAdjustmentSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='batch.product.name', read_only=True)
+    batch_no = serializers.CharField(source='batch.batch_no', read_only=True)
+    adjusted_by_name = serializers.CharField(source='adjusted_by.username', read_only=True)
+
+    class Meta:
+        model = StockAdjustment
+        fields = ['id','batch','batch_no','product_name','adjust_type','reason',
+                  'quantity','notes','adjusted_by','adjusted_by_name','created_at']
+        read_only_fields = ['adjusted_by','created_at']
+
+    def validate(self, data):
+        batch = data['batch']
+        if data['adjust_type'] == 'OUT' and data['quantity'] > batch.quantity:
+            raise serializers.ValidationError(
+                f"Only {batch.quantity} left in batch {batch.batch_no}."
+            )
+        return data
