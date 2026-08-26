@@ -23,7 +23,7 @@ class Address(models.Model):
     pincode = models.CharField(max_length=10, blank=True, null=True)
     lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-
+    landmark = models.CharField(max_length=255, blank=True, null=True)
 
     address_type = models.CharField(
         max_length=10,

@@ -130,6 +130,7 @@ class CreateOrderSerializer(serializers.Serializer):
             "state": address.state,
             "pincode": str(address.pincode).strip(),
             "address_type": address.address_type,
+            "landmark": address.landmark,
         }
 
         if address_snapshot["pincode"] not in ALLOWED_PINCODES:

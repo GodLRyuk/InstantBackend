@@ -22,6 +22,7 @@ class AddAddressAPIView(APIView):
             state=request.data.get("state"),
             pincode=request.data.get("pincode"),
             address_type=request.data.get("address_type", "HOME"),
+            landmark=request.data.get("landmark"),
             is_default=request.data.get("is_default", False),
         )
 
@@ -44,6 +45,7 @@ class AddAddressAPIView(APIView):
             state=request.data.get("state"),
             pincode=request.data.get("pincode"),
             address_type=request.data.get("address_type", "HOME"),
+            landmark=request.data.get("landmark"),
             is_default=request.data.get("is_default", False),
         )
 
@@ -70,6 +72,7 @@ class ListAddressAPIView(APIView):
                 "city": a.city,
                 "state": a.state,
                 "pincode": a.pincode,
+                "landmark": a.landmark,
                 "type": a.address_type,
                 "is_default": a.is_default
             })
