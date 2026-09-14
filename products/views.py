@@ -1,8 +1,10 @@
 from rest_framework import viewsets
 from .models import Bundle, FlashSale, Product
 from .serializers import BundleSerializer, ProductSerializer
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from accounts.permissions import PublicCatalogPermission
 from .serializers import ProductListSerializer
 from orders.models import OrderItem
 from cart.models import CartItem
@@ -14,6 +16,7 @@ from django.utils import timezone
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.filter(is_active=True)
     serializer_class = ProductSerializer
+    permission_classes = [PublicCatalogPermission]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -31,6 +34,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return queryset
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def new_arrivals(request):
     # Get all active products, ordered by created_at descending
     products = Product.objects.filter(is_active=True).order_by('-created_at')
@@ -42,16 +46,21 @@ def new_arrivals(request):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def recommended_products(request):
     user = request.user
 
-    purchased_products = OrderItem.objects.filter(
-        order__user=user
-    ).values_list('product', flat=True)
+    if user.is_authenticated:
+        purchased_products = OrderItem.objects.filter(
+            order__user=user
+        ).values_list('product', flat=True)
 
-    cart_products = CartItem.objects.filter(
-        cart__user=user
-    ).values_list('product', flat=True)
+        cart_products = CartItem.objects.filter(
+            cart__user=user
+        ).values_list('product', flat=True)
+    else:
+        purchased_products = []
+        cart_products = []
 
     all_products = list(purchased_products) + list(cart_products)
 
@@ -86,6 +95,7 @@ def recommended_products(request):
 
     return Response(serializer.data)
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def products_by_category(request, category_id):
     """
     Get products filtered by category ID
@@ -95,6 +105,7 @@ def products_by_category(request, category_id):
     return Response(serializer.data)
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def flash_sale_products(request):
     flash_sale = FlashSale.objects.filter(
         is_active=True,
@@ -124,6 +135,7 @@ def flash_sale_products(request):
         'products': serializer.data
     })
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def bundle_offers(request):
     bundles = Bundle.objects.filter(is_active=True)
     serializer = BundleSerializer(bundles, many=True, context={'request': request})

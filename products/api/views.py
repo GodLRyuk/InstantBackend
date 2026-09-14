@@ -1,6 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework import status
 from products.models import Product
 from masters.models import Category, SubCategory, Brand, Unit
@@ -60,6 +60,8 @@ class ProductCreateAPIView(APIView):
         }, status=201)
 
 class ProductListAPIView(APIView):
+
+    permission_classes = [AllowAny]
 
     def get(self, request):
 
@@ -132,6 +134,8 @@ class ProductDeleteAPIView(APIView):
 
         return Response({"message": "Product deleted successfully"})
 class ProductSearchAPIView(APIView):
+
+    permission_classes = [AllowAny]
 
     def get(self, request):
         query = request.query_params.get("search", "").strip()
