@@ -1,5 +1,6 @@
 """
 Django settings for config project.
+Works locally (reads .env / .env.save) and in Docker (reads real environment variables).
 """
 
 from pathlib import Path
@@ -8,22 +9,33 @@ import os
 import dj_database_url
 from dotenv import load_dotenv
 
-load_dotenv('.env.save')
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-mp56rby*-))lnx(!ui%#^28vv=l&thol6$eop!0i4#e5yij1z$')
+# load_dotenv never overrides variables that already exist,
+# so Docker's environment always wins over these local files.
+load_dotenv(BASE_DIR / '.env')
+load_dotenv(BASE_DIR / '.env.save')
+
+
+def env_list(name, default=''):
+    """Read a comma separated environment variable into a list."""
+    return [v.strip() for v in os.environ.get(name, default).split(',') if v.strip()]
+
+
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY',
+    'django-insecure-mp56rby*-))lnx(!ui%#^28vv=l&thol6$eop!0i4#e5yij1z$',
+)
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ["*"]
-CSRF_TRUSTED_ORIGINS = [
-    'https://web-production-a78c03.up.railway.app',
-    'https://instant-admin-pannel-jews57a73-godlryuks-projects.vercel.app',
-]
+ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', '*')
+CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
+
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
 
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = os.environ.get('CORS_ALLOW_ALL_ORIGINS', 'True') == 'True'
+CORS_ALLOWED_ORIGINS = env_list('CORS_ALLOWED_ORIGINS')
 
 INSTALLED_APPS = [
     'daphne',
@@ -66,15 +78,15 @@ STORAGES = {
 }
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  # must be above CommonMiddleware
     'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -99,7 +111,8 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # ── DATABASE ─────────────────────────────────────────────
 DATABASES = {
     'default': dj_database_url.config(
-        default=os.environ.get('DATABASE_URL')
+        default=os.environ.get('DATABASE_URL'),
+        conn_max_age=60,
     )
 }
 
@@ -110,12 +123,23 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-# ── CHANNELS — No Redis needed ────────────────────────────
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
-    },
-}
+# ── CHANNELS ─────────────────────────────────────────────
+# Server: Redis (set REDIS_URL). Local: falls back to the in-memory layer.
+REDIS_URL = os.environ.get('REDIS_URL')
+
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [REDIS_URL]},
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Asia/Kolkata'

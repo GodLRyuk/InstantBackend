@@ -13,15 +13,14 @@ env/
 media/
 staticfiles/
 
+# Secrets - never commit these
+.env
+.env.*
+serviceAccountKey.json
+
 # OS
 .DS_Store
 
 # IDE
 .vscode/
 .idea/
-venv/
-__pycache__/
-*.pyc
-.env
-media/
-staticfiles/
