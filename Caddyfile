@@ -1,0 +1,14 @@
+api.instantdelivery.cloud {
+	encode gzip
+
+	# Uploaded files (product images etc.)
+	handle /media/* {
+		root * /var/www
+		file_server
+	}
+
+	# Everything else (API, WebSockets, Django admin, static files)
+	handle {
+		reverse_proxy web:8000
+	}
+}
