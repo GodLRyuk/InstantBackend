@@ -12,3 +12,8 @@ api.instantdelivery.cloud {
 		reverse_proxy web:8000
 	}
 }
+
+admin.instantdelivery.cloud {
+	encode gzip
+	reverse_proxy admin:80
+}

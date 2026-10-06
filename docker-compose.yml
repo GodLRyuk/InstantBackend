@@ -37,6 +37,11 @@ services:
     volumes:
       - media_data:/app/media
 
+  # Angular admin panel. Code lives in /opt/instant-admin on the server
+  admin:
+    build: ../instant-admin
+    restart: unless-stopped
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -50,6 +55,7 @@ services:
       - caddy_config:/config
     depends_on:
       - web
+      - admin
 
 volumes:
   pg_data:
