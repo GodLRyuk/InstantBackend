@@ -12,6 +12,6 @@ DATABASE_URL=postgres://instant_user:arZpZEUWzyiKFpCVgEaRTGpkyrZG@db:5432/instan
 REDIS_URL=redis://redis:6379/0
 
 EMAIL_HOST_USER=sylmondal@gmail.com
-EMAIL_HOST_PASSWORD=vbne owyn ifim mtvv
+EMAIL_HOST_PASSWORD=vbneowynifimmtvv
 RAZORPAY_KEY_ID=rzp_test_StsVgck8iNAA8a
 RAZORPAY_SECRET=2950kn0jDNssYM656rGoJAt3
