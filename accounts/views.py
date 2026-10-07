@@ -65,6 +65,8 @@ class RegisterAPIView(APIView):
     def post(self, request):
         User = get_user_model() 
         username = request.data.get("username")
+        first_name = request.data.get("first_name")
+        last_name = request.data.get("last_name")
         email = request.data.get("email")
         password = request.data.get("password")
         phone = request.data.get("phone")
@@ -72,9 +74,9 @@ class RegisterAPIView(APIView):
         zip_code = request.data.get("zip_code")
         role = request.data.get("role", "CUSTOMER")
 
-        if not username or not email or not password or not phone:
+        if not username or not first_name or not last_name or not email or not password or not phone:
             return Response(
-                {"error": "username, email, password and phone are required"},
+                {"error": "username, first name, last name, email, password and phone are required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -92,6 +94,8 @@ class RegisterAPIView(APIView):
 
         user = User.objects.create_user(
             username=username,
+            first_name=first_name,
+            last_name=last_name,
             email=email,
             password=password,
             phone=phone,
