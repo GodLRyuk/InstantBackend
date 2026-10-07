@@ -43,6 +43,8 @@ class AdminLoginAPIView(APIView):
             'refresh': str(refresh),
             'access': str(refresh.access_token),
             'user_id': user.id,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
             'email': user.email,
             'zip_code': user.zip_code,
             'is_staff': user.is_staff,
@@ -69,6 +71,8 @@ class CustomerLoginAPIView(APIView):
             "refresh": str(refresh),
             "access": str(refresh.access_token),
             "user_id": user.id,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
             "email": user.email,
             'phone': user.phone,
             'address': user.address,
@@ -83,6 +87,8 @@ class RegisterAPIView(APIView):
     def post(self, request):
 
         username = request.data.get("username")
+        first_name = request.data.get("first_name")
+        last_name = request.data.get("last_name")
         email = request.data.get("email")
         password = request.data.get("password")
         phone = request.data.get("phone")
@@ -93,9 +99,9 @@ class RegisterAPIView(APIView):
         profile_image = request.FILES.get("profile_image")
 
         # ✅ Validation
-        if not username or not email or not password or not phone:
+        if not username or not first_name or not last_name or not email or not password or not phone:
             return Response(
-                {"error": "username, email, password and phone are required"},
+                {"error": "username, first name, last name, email, password and phone are required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -109,6 +115,8 @@ class RegisterAPIView(APIView):
         if role == "ADMIN":
             user = User.objects.create_user(
                 username=username,
+                first_name=first_name,
+                last_name=last_name,
                 email=email,
                 password=password,
                 phone=phone,
@@ -121,6 +129,8 @@ class RegisterAPIView(APIView):
         else:
             user = User.objects.create_user(
                 username=username,
+                first_name=first_name,
+                last_name=last_name,
                 email=email,
                 password=password,
                 phone=phone,
@@ -167,6 +177,8 @@ class UserProfileAPIView(APIView):
         data = {
             "id": user.id,
             "username": user.username,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
             "email": user.email,
             "phone": user.phone,
             "address": user.address,
