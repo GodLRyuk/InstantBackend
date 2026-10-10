@@ -2,8 +2,11 @@ from datetime import time
 from decimal import Decimal
 from types import SimpleNamespace
 
-from django.test import SimpleTestCase
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase
+from rest_framework.test import APIClient
 
+from .models import Restaurant
 from .services import calculate_bill
 from .utils import fmt_time, haversine_km, whole_rupees
 
@@ -58,3 +61,79 @@ class UtilTests(SimpleTestCase):
         # Asansol to Durgapur is roughly 35 km
         km = haversine_km(23.6850, 86.9740, 23.5204, 87.3119)
         self.assertTrue(30 < km < 45)
+
+
+class AdminCatalogAPITests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.staff = user_model.objects.create_user(
+            username='catalog-admin',
+            password='StrongPass123',
+            phone='9876543211',
+            role='ADMIN',
+            is_staff=True,
+        )
+        self.owner = user_model.objects.create_user(
+            username='restaurant-owner',
+            password='StrongPass123',
+            phone='9876543212',
+            role='CUSTOMER',
+        )
+        self.restaurant = Restaurant.objects.create(
+            owner=self.owner,
+            name='Test Restaurant',
+            phone='9876543213',
+            address_line='1 Main Road',
+            city='Bengaluru',
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.staff)
+
+    def test_admin_can_create_and_list_cuisines(self):
+        create_response = self.client.post(
+            '/api/restaurants/admin/cuisines/',
+            {'name': 'South Indian'},
+            format='json',
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(create_response.data, {'id': create_response.data['id'], 'name': 'South Indian'})
+
+        list_response = self.client.get('/api/restaurants/admin/cuisines/')
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data[0]['name'], 'South Indian')
+
+    def test_admin_can_create_and_filter_menu_categories(self):
+        create_response = self.client.post(
+            '/api/restaurants/admin/menu-categories/',
+            {
+                'restaurant': self.restaurant.id,
+                'name': 'Beverages',
+                'sort_order': 2,
+            },
+            format='json',
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(create_response.data['restaurant'], self.restaurant.id)
+        self.assertEqual(create_response.data['restaurant_name'], 'Test Restaurant')
+        self.assertEqual(create_response.data['name'], 'Beverages')
+
+        list_response = self.client.get(
+            f'/api/restaurants/admin/menu-categories/?restaurant={self.restaurant.id}'
+        )
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data[0]['name'], 'Beverages')
+
+    def test_non_staff_cannot_create_cuisine(self):
+        self.client.force_authenticate(user=self.owner)
+
+        response = self.client.post(
+            '/api/restaurants/admin/cuisines/',
+            {'name': 'South Indian'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 403)
