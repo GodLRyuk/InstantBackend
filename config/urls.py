@@ -38,6 +38,7 @@ urlpatterns = [
     path("api/picker/", include("store_picker.urls")),
     path("api/expenses/", include("expenses.urls")),
     path("api/store/", include("store_timing.urls")),
+    path('api/restaurants/', include('restaurants.urls')),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

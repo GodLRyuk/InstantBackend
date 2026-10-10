@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     "store_picker",
     "expenses",
     "store_timing",
+    "restaurants",
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
