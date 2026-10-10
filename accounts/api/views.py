@@ -4,7 +4,7 @@ from rest_framework import status
 from django.contrib.auth import authenticate, get_user_model
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from .utils.email_utils import send_otp_email
 import random
 from django.utils import timezone
@@ -188,6 +188,51 @@ class UserProfileAPIView(APIView):
         }
 
         return Response(data, status=status.HTTP_200_OK)
+
+
+class UserListAPIView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        queryset = User.objects.all().order_by("-date_joined", "-id")
+        role = request.query_params.get("role")
+
+        if role:
+            valid_roles = {choice[0] for choice in User.ROLE_CHOICES}
+            if role not in valid_roles:
+                return Response(
+                    {"error": "Invalid role", "valid_roles": sorted(valid_roles)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            queryset = queryset.filter(role=role)
+
+        users = [
+            {
+                "id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+                "phone": user.phone,
+                "address": user.address,
+                "zip_code": user.zip_code,
+                "role": user.role,
+                "profile_image": (
+                    request.build_absolute_uri(user.profile_image.url)
+                    if user.profile_image
+                    else None
+                ),
+                "is_active": user.is_active,
+                "is_staff": user.is_staff,
+                "is_verified": user.is_verified,
+                "is_online": user.is_online,
+                "date_joined": user.date_joined,
+            }
+            for user in queryset
+        ]
+        return Response({"count": len(users), "results": users}, status=status.HTTP_200_OK)
+
+
 class VerifyOTPAPIView(APIView):
     permission_classes = [IsAuthenticated]
 

@@ -12,6 +12,7 @@ from .models import Cuisine, MenuCategory, MenuItem, Restaurant, RestaurantOrder
 from .permissions import IsStaffUser
 from .serializers import (
     AdminRestaurantSerializer,
+    AdminMenuCategorySerializer,
     CuisineSerializer,
     MenuCategorySerializer,
     MenuItemSerializer,
@@ -332,6 +333,26 @@ class PartnerOrderViewSet(PartnerBaseMixin, OrderFilterMixin, viewsets.ReadOnlyM
 
 
 # =========================================================== admin (Instant team)
+class AdminCuisineViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsStaffUser]
+    serializer_class = CuisineSerializer
+    queryset = Cuisine.objects.all()
+    pagination_class = None
+
+
+class AdminMenuCategoryViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsStaffUser]
+    serializer_class = AdminMenuCategorySerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        queryset = MenuCategory.objects.select_related('restaurant')
+        restaurant_id = self.request.query_params.get('restaurant')
+        if restaurant_id:
+            queryset = queryset.filter(restaurant_id=restaurant_id)
+        return queryset
+
+
 class AdminRestaurantViewSet(viewsets.ModelViewSet):
     """Review and onboard restaurants. ?status=pending  ?q=name"""
 

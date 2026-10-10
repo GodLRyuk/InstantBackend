@@ -219,6 +219,27 @@ class MenuCategorySerializer(serializers.ModelSerializer):
         return value
 
 
+class AdminMenuCategorySerializer(serializers.ModelSerializer):
+    restaurant = serializers.PrimaryKeyRelatedField(queryset=Restaurant.objects.all())
+    restaurant_name = serializers.CharField(source='restaurant.name', read_only=True)
+
+    class Meta:
+        model = MenuCategory
+        fields = ['id', 'restaurant', 'restaurant_name', 'name', 'sort_order']
+
+    def validate(self, attrs):
+        restaurant = attrs.get('restaurant', getattr(self.instance, 'restaurant', None))
+        name = attrs.get('name', getattr(self.instance, 'name', None))
+        queryset = MenuCategory.objects.filter(restaurant=restaurant, name__iexact=name)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                {'name': 'This restaurant already has a category with this name.'}
+            )
+        return attrs
+
+
 class PartnerMenuItemSerializer(serializers.ModelSerializer):
     category = serializers.PrimaryKeyRelatedField(
         queryset=MenuCategory.objects.none(), required=False, allow_null=True
