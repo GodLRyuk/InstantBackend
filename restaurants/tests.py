@@ -1,9 +1,14 @@
 from datetime import time
 from decimal import Decimal
+from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import SimpleTestCase, TestCase, override_settings
+from PIL import Image
 from rest_framework.test import APIClient
 
 from .models import Restaurant
@@ -209,6 +214,34 @@ class RestaurantMenuAPITests(TestCase):
 
         self.assertEqual(delete_response.status_code, 204)
         self.assertFalse(self.restaurant.items.filter(pk=item_id).exists())
+
+    def test_restaurant_owner_uploads_and_stores_menu_item_image(self):
+        image_data = BytesIO()
+        Image.new('RGB', (1, 1), color='white').save(image_data, format='PNG')
+        uploaded_image = SimpleUploadedFile(
+            'clear-soup.png',
+            image_data.getvalue(),
+            content_type='image/png',
+        )
+
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            response = self.client.post(
+                '/api/restaurants/partner/items/',
+                {
+                    'name': 'Clear Soup',
+                    'description': '',
+                    'category': '',
+                    'is_veg': 'true',
+                    'price': '100.00',
+                    'image': uploaded_image,
+                },
+                format='multipart',
+            )
+
+            self.assertEqual(response.status_code, 201, response.data)
+            menu_item = self.restaurant.items.get(pk=response.data['id'])
+            self.assertEqual(menu_item.image.name, f'restaurants/items/{uploaded_image.name}')
+            self.assertTrue(Path(menu_item.image.path).is_file())
 
     def test_restaurant_owner_cannot_access_another_restaurants_menu_item(self):
         other_item = self.other_restaurant.items.create(

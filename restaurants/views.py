@@ -4,6 +4,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import generics, mixins, status as http, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -269,6 +270,7 @@ class PartnerCategoryViewSet(PartnerBaseMixin, viewsets.ModelViewSet):
 class PartnerItemViewSet(PartnerBaseMixin, viewsets.ModelViewSet):
     """Dishes. Send multipart when uploading an image."""
 
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
     serializer_class = PartnerMenuItemSerializer
 
     def get_queryset(self):
