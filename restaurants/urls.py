@@ -19,5 +19,4 @@ router.register(r'', views.RestaurantViewSet, basename='restaurant')  # keep las
 urlpatterns = [
     path('cuisines/', views.CuisineListView.as_view(), name='restaurant-cuisines'),
     path('partner/onboard/', views.PartnerOnboardView.as_view(), name='partner-onboard'),
-    path('partner/restaurant/', views.PartnerRestaurantView.as_view(), name='partner-restaurant'),
 ] + router.urls

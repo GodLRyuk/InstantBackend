@@ -3,7 +3,7 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, mixins, status as http, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -54,18 +54,28 @@ class CuisineListView(generics.ListAPIView):
     pagination_class = None
 
 
-class RestaurantViewSet(viewsets.ReadOnlyModelViewSet):
+class RestaurantViewSet(mixins.UpdateModelMixin, viewsets.ReadOnlyModelViewSet):
     """GET /api/restaurants/?q=&cuisine=&lat=&lng=   and   /{id}/   and   /{id}/menu/"""
 
     lookup_value_regex = r'\d+'
     pagination_class = None
 
     def get_queryset(self):
+        if (
+            self.request.user.is_authenticated
+            and getattr(self.request.user, 'role', None) == 'RESTAURANT'
+        ):
+            return Restaurant.objects.filter(owner=self.request.user).prefetch_related('cuisines')
         return Restaurant.objects.filter(status=Restaurant.Status.APPROVED).prefetch_related(
             'cuisines'
         )
 
     def get_serializer_class(self):
+        if (
+            self.request.user.is_authenticated
+            and getattr(self.request.user, 'role', None) == 'RESTAURANT'
+        ):
+            return PartnerRestaurantSerializer
         return RestaurantDetailSerializer if self.action == 'retrieve' else RestaurantListSerializer
 
     def _geo(self):
@@ -80,6 +90,10 @@ class RestaurantViewSet(viewsets.ReadOnlyModelViewSet):
 
     def list(self, request, *args, **kwargs):
         qs = self.get_queryset()
+        if request.user.is_authenticated and getattr(request.user, 'role', None) == 'RESTAURANT':
+            restaurants = list(qs)
+            return Response(self.get_serializer(restaurants, many=True).data)
+
         q = request.query_params.get('q', '').strip()
         cuisine = request.query_params.get('cuisine', '').strip()
         if q:
@@ -116,6 +130,14 @@ class RestaurantViewSet(viewsets.ReadOnlyModelViewSet):
             'category__sort_order', 'sort_order', 'name'
         )
         return Response(MenuItemSerializer(items, many=True, context={'request': request}).data)
+
+    def update(self, request, *args, **kwargs):
+        require_restaurant_owner(request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        require_restaurant_owner(request)
+        return super().partial_update(request, *args, **kwargs)
 
 
 # =========================================================== customer: orders
@@ -211,7 +233,13 @@ class CustomerOrderViewSet(
 
 
 # =========================================================== partner (restaurant owner)
+def require_restaurant_owner(request):
+    if request.user.role != 'RESTAURANT':
+        raise PermissionDenied('A restaurant owner account is required.')
+
+
 def partner_restaurant(request):
+    require_restaurant_owner(request)
     restaurant = Restaurant.objects.filter(owner=request.user).first()
     if restaurant is None:
         raise NotFound('No restaurant is registered for this account.')
@@ -222,6 +250,7 @@ class PartnerOnboardView(APIView):
     """POST /api/restaurants/partner/onboard/  (multipart, so logo and cover can be sent)."""
 
     def post(self, request):
+        require_restaurant_owner(request)
         if Restaurant.objects.filter(owner=request.user).exists():
             return Response(
                 {'detail': 'You already have a restaurant registered.'},
@@ -231,15 +260,6 @@ class PartnerOnboardView(APIView):
         s.is_valid(raise_exception=True)
         s.save(owner=request.user, status=Restaurant.Status.PENDING)
         return Response(s.data, status=http.HTTP_201_CREATED)
-
-
-class PartnerRestaurantView(generics.RetrieveUpdateAPIView):
-    """GET / PATCH my restaurant. 404 means this user has not onboarded yet."""
-
-    serializer_class = PartnerRestaurantSerializer
-
-    def get_object(self):
-        return partner_restaurant(self.request)
 
 
 class PartnerBaseMixin:

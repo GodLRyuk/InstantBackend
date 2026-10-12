@@ -270,3 +270,146 @@ class RestaurantMenuAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+
+class PartnerRestaurantAPITests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            username='restaurant-profile-owner',
+            password='StrongPass123',
+            phone='9876543221',
+            role='RESTAURANT',
+        )
+        self.other_owner = user_model.objects.create_user(
+            username='restaurant-profile-other',
+            password='StrongPass123',
+            phone='9876543222',
+            role='RESTAURANT',
+        )
+        self.customer = user_model.objects.create_user(
+            username='restaurant-profile-customer',
+            password='StrongPass123',
+            phone='9876543223',
+            role='CUSTOMER',
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.owner)
+
+    def test_owner_onboards_and_can_load_and_update_linked_restaurant(self):
+        create_response = self.client.post(
+            '/api/restaurants/partner/onboard/',
+            {
+                'name': 'Owner Restaurant',
+                'phone': '9876543224',
+                'address_line': '1 Main Road',
+                'city': 'Bengaluru',
+                'fssai_number': '12345678901234',
+            },
+            format='json',
+        )
+
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        restaurant = Restaurant.objects.get(pk=create_response.data['id'])
+        self.assertEqual(restaurant.owner, self.owner)
+        self.assertEqual(create_response.data['status'], Restaurant.Status.PENDING)
+
+        get_response = self.client.get('/api/restaurants/')
+
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(len(get_response.data), 1)
+        self.assertEqual(get_response.data[0]['id'], restaurant.id)
+        self.assertEqual(get_response.data[0]['name'], 'Owner Restaurant')
+
+        detail_response = self.client.get(f'/api/restaurants/{restaurant.id}/')
+
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data['id'], restaurant.id)
+        self.assertEqual(detail_response.data['status'], Restaurant.Status.PENDING)
+
+        update_response = self.client.patch(
+            f'/api/restaurants/{restaurant.id}/',
+            {'name': 'Updated Restaurant', 'city': 'Mysuru'},
+            format='json',
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.data['name'], 'Updated Restaurant')
+        self.assertEqual(update_response.data['city'], 'Mysuru')
+        restaurant.refresh_from_db()
+        self.assertEqual(restaurant.owner, self.owner)
+
+    def test_non_restaurant_role_cannot_onboard_a_restaurant(self):
+        self.client.force_authenticate(user=self.customer)
+
+        response = self.client.post(
+            '/api/restaurants/partner/onboard/',
+            {
+                'name': 'Customer Restaurant',
+                'phone': '9876543225',
+                'address_line': '1 Main Road',
+                'city': 'Bengaluru',
+                'fssai_number': '12345678901235',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Restaurant.objects.filter(owner=self.customer).exists())
+
+    def test_owner_only_loads_their_linked_restaurant(self):
+        other_restaurant = Restaurant.objects.create(
+            owner=self.other_owner,
+            name='Other Restaurant',
+            phone='9876543226',
+            address_line='2 Main Road',
+            city='Bengaluru',
+        )
+
+        response = self.client.get('/api/restaurants/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+        self.assertTrue(Restaurant.objects.filter(pk=other_restaurant.pk).exists())
+
+    def test_owner_cannot_retrieve_or_edit_another_owners_restaurant(self):
+        other_restaurant = Restaurant.objects.create(
+            owner=self.other_owner,
+            name='Other Restaurant',
+            phone='9876543226',
+            address_line='2 Main Road',
+            city='Bengaluru',
+        )
+
+        get_response = self.client.get(f'/api/restaurants/{other_restaurant.id}/')
+        patch_response = self.client.patch(
+            f'/api/restaurants/{other_restaurant.id}/',
+            {'name': 'Hijacked Restaurant'},
+            format='json',
+        )
+
+        self.assertEqual(get_response.status_code, 404)
+        self.assertEqual(patch_response.status_code, 404)
+        other_restaurant.refresh_from_db()
+        self.assertEqual(other_restaurant.name, 'Other Restaurant')
+
+    def test_customer_cannot_patch_restaurant_through_public_api(self):
+        restaurant = Restaurant.objects.create(
+            owner=self.owner,
+            name='Approved Restaurant',
+            phone='9876543227',
+            address_line='1 Main Road',
+            city='Bengaluru',
+            status=Restaurant.Status.APPROVED,
+        )
+        self.client.force_authenticate(user=self.customer)
+
+        response = self.client.patch(
+            f'/api/restaurants/{restaurant.id}/',
+            {'name': 'Unauthorized Change'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 403)
+        restaurant.refresh_from_db()
+        self.assertEqual(restaurant.name, 'Approved Restaurant')
