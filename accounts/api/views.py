@@ -29,12 +29,14 @@ class AdminLoginAPIView(APIView):
         if not email or not password:
             return Response({'error': 'Email and password required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = authenticate(request, username=email, password=password)
+        username = User.objects.filter(email=email).values_list('username', flat=True).first() or email
+        user = authenticate(request, username=username, password=password)
 
         if user is None:
             return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        if not user.is_staff:
+        is_restaurant = user.role == "RESTAURANT"
+        if not user.is_staff and not is_restaurant:
             return Response({'error': 'Not an admin user'}, status=status.HTTP_403_FORBIDDEN)
 
         refresh = RefreshToken.for_user(user)
@@ -48,6 +50,8 @@ class AdminLoginAPIView(APIView):
             'email': user.email,
             'zip_code': user.zip_code,
             'is_staff': user.is_staff,
+            'role': user.role,
+            'is_restaurant': is_restaurant,
             'profile_image': request.build_absolute_uri(user.profile_image.url) if user.profile_image else None,
         })
 class CustomerLoginAPIView(APIView):
@@ -97,6 +101,13 @@ class RegisterAPIView(APIView):
         role = request.data.get("role", "CUSTOMER")
 
         profile_image = request.FILES.get("profile_image")
+
+        valid_roles = {choice[0] for choice in User.ROLE_CHOICES}
+        if not isinstance(role, str) or role not in valid_roles or role == "ADMIN":
+            return Response(
+                {"error": "Invalid role"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         # ✅ Validation
         if not username or not first_name or not last_name or not email or not password or not phone:
