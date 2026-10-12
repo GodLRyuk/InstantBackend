@@ -26,6 +26,75 @@ class RegisterAPITest(TestCase):
         self.assertEqual(user.first_name, 'Alice')
         self.assertEqual(user.last_name, 'Smith')
 
+    def test_register_restaurant_role_without_staff_access(self):
+        client = APIClient()
+        payload = {
+            'username': 'restaurant-owner',
+            'first_name': 'Restaurant',
+            'last_name': 'Owner',
+            'email': 'restaurant@example.com',
+            'password': 'StrongPass123',
+            'phone': '9876543214',
+            'role': 'RESTAURANT',
+        }
+
+        response = client.post('/api/accounts/register/', payload, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        user = get_user_model().objects.get(email='restaurant@example.com')
+        self.assertEqual(user.role, 'RESTAURANT')
+        self.assertFalse(user.is_staff)
+
+    def test_public_registration_cannot_create_admin(self):
+        payload = {
+            'username': 'not-admin',
+            'first_name': 'Not',
+            'last_name': 'Admin',
+            'email': 'not-admin@example.com',
+            'password': 'StrongPass123',
+            'phone': '9876543215',
+            'role': 'ADMIN',
+        }
+
+        response = self.client.post('/api/accounts/register/', payload, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(get_user_model().objects.filter(email='not-admin@example.com').exists())
+
+
+class AdminLoginAPITest(TestCase):
+    def setUp(self):
+        self.restaurant_user = get_user_model().objects.create_user(
+            username='restaurant-login',
+            email='restaurant-login@example.com',
+            password='StrongPass123',
+            phone='9876543216',
+            role='RESTAURANT',
+        )
+        self.client = APIClient()
+
+    def test_restaurant_role_can_login_to_custom_admin_panel_not_django_admin(self):
+        response = self.client.post(
+            '/api/accounts/admin-login/',
+            {'email': self.restaurant_user.email, 'password': 'StrongPass123'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['role'], 'RESTAURANT')
+        self.assertTrue(response.data['is_restaurant'])
+        self.assertFalse(response.data['is_staff'])
+        self.assertFalse(self.restaurant_user.is_staff)
+        self.assertTrue(
+            self.client.login(
+                username=self.restaurant_user.username,
+                password='StrongPass123',
+            )
+        )
+        django_admin_response = self.client.get('/admin/')
+        self.assertEqual(django_admin_response.status_code, 302)
+        self.assertIn('/admin/login/', django_admin_response['Location'])
+
 
 class UserListAPITest(TestCase):
     def setUp(self):

@@ -137,3 +137,103 @@ class AdminCatalogAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+
+class RestaurantMenuAPITests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            username='menu-owner',
+            password='StrongPass123',
+            phone='9876543217',
+            role='RESTAURANT',
+        )
+        self.other_owner = user_model.objects.create_user(
+            username='other-menu-owner',
+            password='StrongPass123',
+            phone='9876543218',
+            role='RESTAURANT',
+        )
+        self.restaurant = Restaurant.objects.create(
+            owner=self.owner,
+            name='Owner Restaurant',
+            phone='9876543219',
+            address_line='1 Main Road',
+            city='Bengaluru',
+        )
+        self.other_restaurant = Restaurant.objects.create(
+            owner=self.other_owner,
+            name='Other Restaurant',
+            phone='9876543220',
+            address_line='2 Main Road',
+            city='Bengaluru',
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.owner)
+
+    def test_restaurant_owner_can_add_edit_and_delete_own_menu_item(self):
+        create_response = self.client.post(
+            '/api/restaurants/partner/items/',
+            {
+                'name': 'Paneer Biryani',
+                'description': 'Served with raita',
+                'is_veg': True,
+                'price': '220.00',
+                'mrp': '250.00',
+                'is_available': True,
+                'packaging_charge': '10.00',
+            },
+            format='json',
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        item_id = create_response.data['id']
+        self.assertTrue(
+            self.restaurant.items.filter(pk=item_id, name='Paneer Biryani').exists()
+        )
+
+        update_response = self.client.patch(
+            f'/api/restaurants/partner/items/{item_id}/',
+            {'price': '240.00'},
+            format='json',
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.data['price'], '240.00')
+        self.assertEqual(
+            self.restaurant.items.get(pk=item_id).price,
+            Decimal('240.00'),
+        )
+
+        delete_response = self.client.delete(f'/api/restaurants/partner/items/{item_id}/')
+
+        self.assertEqual(delete_response.status_code, 204)
+        self.assertFalse(self.restaurant.items.filter(pk=item_id).exists())
+
+    def test_restaurant_owner_cannot_access_another_restaurants_menu_item(self):
+        other_item = self.other_restaurant.items.create(
+            name='Other Dish',
+            price='100.00',
+        )
+
+        response = self.client.patch(
+            f'/api/restaurants/partner/items/{other_item.id}/',
+            {'price': '1.00'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 404)
+        other_item.refresh_from_db()
+        self.assertEqual(other_item.price, Decimal('100.00'))
+
+    def test_restaurant_owner_cannot_access_staff_admin_catalog(self):
+        response = self.client.post(
+            '/api/restaurants/admin/menu-categories/',
+            {
+                'restaurant': self.restaurant.id,
+                'name': 'Beverages',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 403)
