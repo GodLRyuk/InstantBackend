@@ -426,7 +426,7 @@ class RestaurantDriverOrdersView(APIView):
 
 
 class RestaurantDriverOrderDetailView(APIView):
-    """Retrieve a restaurant order only when it is assigned to the current driver."""
+    """Retrieve or update a restaurant order assigned to the current driver."""
 
     permission_classes = [IsAuthenticated]
 
@@ -440,6 +440,34 @@ class RestaurantDriverOrderDetailView(APIView):
             driver=request.user,
         )
         return Response(RestaurantDriverOrdersView._serialize_assignment(assignment))
+
+    @transaction.atomic
+    def post(self, request, order_id):
+        if request.user.role not in ('DELIVERY', 'PICKUP'):
+            raise PermissionDenied('A delivery agent account is required.')
+
+        assignment = get_object_or_404(
+            RestaurantDeliveryAssignment.objects.select_for_update(),
+            order_id=order_id,
+            driver=request.user,
+        )
+        requested_status = request.data.get('status')
+        transitions = {
+            'picked_up': S.OUT_FOR_DELIVERY,
+            'delivered': S.DELIVERED,
+        }
+        new_status = transitions.get(requested_status)
+        if new_status is None:
+            raise ValidationError({
+                'status': 'Expected either "picked_up" or "delivered".',
+            })
+
+        order = services.change_status(
+            order_id,
+            new_status,
+            staff=True,
+        )
+        return Response(OrderSerializer(order, context={'request': request}).data)
 
 
 # =========================================================== admin (Instant team)
