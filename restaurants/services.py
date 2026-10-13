@@ -9,7 +9,13 @@ from django.db import transaction
 from django.forms.models import model_to_dict
 from rest_framework.exceptions import APIException, ValidationError
 
-from .models import MenuItem, Restaurant, RestaurantOrder, RestaurantOrderItem
+from .models import (
+    MenuItem,
+    Restaurant,
+    RestaurantDeliveryAssignment,
+    RestaurantOrder,
+    RestaurantOrderItem,
+)
 from .utils import haversine_km, whole_rupees
 
 GST_RATE = Decimal('0.05')
@@ -17,6 +23,121 @@ GST_RATE = Decimal('0.05')
 S = RestaurantOrder.Status
 P = RestaurantOrder.PaymentStatus
 M = RestaurantOrder.PaymentMethod
+
+
+def notify_restaurant_owner_order_placed(order):
+    from orders.utils import notify_restaurant_owner
+
+    transaction.on_commit(
+        lambda: notify_restaurant_owner(
+            order.restaurant.owner_id,
+            {
+                'type': 'restaurant_order_placed',
+                'order_type': 'restaurant',
+                'order_id': str(order.id),
+                'order_number': order.order_number,
+                'restaurant_id': str(order.restaurant_id),
+                'status': order.status,
+                'customer_name': order.customer_name,
+                'customer_phone': order.customer_phone,
+                'total_amount': str(order.total_amount),
+                'items': [
+                    {
+                        'name': item.name,
+                        'quantity': item.quantity,
+                        'is_veg': item.is_veg,
+                        'unit_price': str(item.unit_price),
+                    }
+                    for item in order.items.all()
+                ],
+            },
+        )
+    )
+
+
+def _select_restaurant_delivery_driver(order):
+    from accounts.models import User
+    from orders.models import DeliveryAssignment
+    from orders.services.driver_assignment import calculate_distance
+
+    drivers = list(User.objects.filter(role='DELIVERY', is_online=True))
+    if not drivers:
+        return None
+
+    if order.delivery_lat is None or order.delivery_lng is None:
+        return drivers[0]
+
+    active_statuses = ['ASSIGNED', 'PICKED_UP', 'OUT_FOR_DELIVERY']
+    best_driver = None
+    best_score = float('inf')
+    for driver in drivers:
+        if driver.latitude is None or driver.longitude is None:
+            continue
+        distance = calculate_distance(
+            order.delivery_lat,
+            order.delivery_lng,
+            driver.latitude,
+            driver.longitude,
+        )
+        active_orders = DeliveryAssignment.objects.filter(
+            driver=driver, status__in=active_statuses
+        ).count()
+        active_restaurant_orders = RestaurantDeliveryAssignment.objects.filter(
+            driver=driver, status__in=active_statuses
+        ).count()
+        score = distance + (active_orders + active_restaurant_orders) * 2
+        if score < best_score:
+            best_score = score
+            best_driver = driver
+
+    return best_driver or drivers[0]
+
+
+def dispatch_restaurant_order(order):
+    assignment = RestaurantDeliveryAssignment.objects.filter(order=order).first()
+    if assignment:
+        return assignment
+
+    driver = _select_restaurant_delivery_driver(order)
+    if driver is None:
+        return None
+
+    assignment = RestaurantDeliveryAssignment.objects.create(order=order, driver=driver)
+    from orders.utils import notify_driver
+
+    transaction.on_commit(
+        lambda: notify_driver(
+            driver.id,
+            {
+                'type': 'restaurant_delivery_assigned',
+                'order_type': 'restaurant',
+                'order_id': str(order.id),
+                'order_number': order.order_number,
+                'order_status': order.status,
+                'payment_status': order.payment_status,
+                'payment_method': order.payment_method,
+                'total_amount': str(order.total_amount),
+                'customer_name': order.customer_name,
+                'customer_phone': order.customer_phone,
+                'address': order.delivery_address,
+                'restaurant_name': order.restaurant.name,
+                'restaurant_phone': order.restaurant.phone,
+                'restaurant_address': order.restaurant.address_line,
+                'items': [
+                    {
+                        'name': item.name,
+                        'quantity': item.quantity,
+                        'is_veg': item.is_veg,
+                    }
+                    for item in order.items.all()
+                ],
+                'assignment_id': assignment.id,
+                'restaurant_id': str(order.restaurant_id),
+                'status': assignment.status,
+            },
+        )
+    )
+    return assignment
 
 
 # ---------------------------------------------------------------- pricing
@@ -220,6 +341,8 @@ def create_order(user, quote, payment_method, notes=''):
         except Exception as exc:  # noqa: BLE001 - any gateway problem rolls the order back
             raise PaymentGatewayError() from exc
         order.save(update_fields=['razorpay_order_id'])
+    elif order.status == RestaurantOrder.Status.PLACED:
+        notify_restaurant_owner_order_placed(order)
     return order
 
 
@@ -270,5 +393,7 @@ def change_status(order_id, new_status, *, staff=False, reason='', allow=None, *
 
     order.status = new_status
     order.save()
+    if new_status == S.ACCEPTED and not staff:
+        dispatch_restaurant_order(order)
     # TODO: notify the customer / restaurant here (Channels or FCM).
     return order

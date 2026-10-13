@@ -1,6 +1,11 @@
 import json
+from urllib.parse import parse_qs
+
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import AccessToken
 
 
 class DriverConsumer(AsyncWebsocketConsumer):
@@ -106,3 +111,43 @@ class OrderTrackingConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             print(f'❌ get_driver_id error: {e}')
         return None
+
+
+class RestaurantOwnerConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        owner_id = int(self.scope['url_route']['kwargs']['owner_id'])
+        query = self.scope.get('query_string', b'').decode()
+        token = parse_qs(query).get('token', [None])[0]
+        authenticated_owner_id = await self.get_owner_id(token) if token else None
+        if authenticated_owner_id != owner_id:
+            await self.close(code=4403)
+            return
+
+        self.group_name = f'restaurant_owner_{owner_id}'
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        if hasattr(self, 'group_name'):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def new_order(self, event):
+        await self.send(text_data=json.dumps({
+            'type': 'new_order',
+            'order': event['order'],
+        }))
+
+    @staticmethod
+    @database_sync_to_async
+    def get_owner_id(token):
+        try:
+            access_token = AccessToken(token)
+        except TokenError:
+            return None
+
+        user_model = get_user_model()
+        return user_model.objects.filter(
+            pk=access_token['user_id'],
+            role='RESTAURANT',
+            is_active=True,
+        ).values_list('pk', flat=True).first()
