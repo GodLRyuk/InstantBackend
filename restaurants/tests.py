@@ -4,14 +4,22 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+from channels.routing import URLRouter
+from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from PIL import Image
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Restaurant
+from orders.routing import websocket_urlpatterns
+from .models import MenuItem, Restaurant, RestaurantDeliveryAssignment, RestaurantOrder
+from . import services
 from .services import calculate_bill
 from .utils import fmt_time, haversine_km, whole_rupees
 
@@ -393,6 +401,175 @@ class PartnerRestaurantAPITests(TestCase):
         other_restaurant.refresh_from_db()
         self.assertEqual(other_restaurant.name, 'Other Restaurant')
 
+
+class RestaurantOrderDispatchTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(
+            username='dispatch-restaurant-owner',
+            password='StrongPass123',
+            phone='9876543228',
+            role='RESTAURANT',
+            fcm_token='restaurant-fcm-token',
+        )
+        self.customer = user_model.objects.create_user(
+            username='dispatch-customer',
+            password='StrongPass123',
+            phone='9876543229',
+            role='CUSTOMER',
+        )
+        self.driver = user_model.objects.create_user(
+            username='dispatch-driver',
+            password='StrongPass123',
+            phone='9876543230',
+            role='DELIVERY',
+            is_online=True,
+            fcm_token='driver-fcm-token',
+        )
+        self.restaurant = Restaurant.objects.create(
+            owner=self.owner,
+            name='Dispatch Restaurant',
+            phone='9876543231',
+            address_line='1 Main Road',
+            city='Bengaluru',
+            status=Restaurant.Status.APPROVED,
+        )
+        self.client = APIClient()
+
+    def create_order(self, status=RestaurantOrder.Status.PLACED):
+        return RestaurantOrder.objects.create(
+            customer=self.customer,
+            restaurant=self.restaurant,
+            status=status,
+            payment_method=RestaurantOrder.PaymentMethod.COD,
+            item_total=Decimal('100.00'),
+            total_amount=Decimal('125.00'),
+            customer_name='Dispatch Customer',
+            customer_phone=self.customer.phone,
+            delivery_address={'address': '2 Main Road'},
+        )
+
+    def test_owner_gets_push_when_cod_order_is_placed(self):
+        menu_item = MenuItem.objects.create(
+            restaurant=self.restaurant,
+            name='Soup',
+            price=Decimal('100.00'),
+        )
+        quote = {
+            'restaurant': self.restaurant,
+            'lines': [(menu_item, 1)],
+            'bill': SimpleNamespace(
+                item_total=Decimal('100.00'),
+                discount=Decimal('0.00'),
+                delivery_fee=Decimal('25.00'),
+                packaging=Decimal('0.00'),
+                gst=Decimal('5.00'),
+                total=Decimal('130.00'),
+            ),
+            'address': {
+                'snapshot': {},
+                'lat': None,
+                'lng': None,
+                'name': '',
+                'phone': '',
+            },
+        }
+        with patch('orders.utils.notify_restaurant_owner') as send_notification:
+            with self.captureOnCommitCallbacks(execute=True):
+                order = services.create_order(
+                    self.customer,
+                    quote,
+                    RestaurantOrder.PaymentMethod.COD,
+                )
+
+        send_notification.assert_called_once()
+        args = send_notification.call_args.args
+        self.assertEqual(args[0], self.owner.id)
+        self.assertEqual(args[1]['type'], 'restaurant_order_placed')
+        self.assertEqual(args[1]['order_id'], str(order.id))
+
+    def test_owner_gets_push_when_online_order_becomes_placed(self):
+        order = self.create_order(status=RestaurantOrder.Status.AWAITING_PAYMENT)
+        order.payment_method = RestaurantOrder.PaymentMethod.ONLINE
+        order.razorpay_order_id = 'razorpay-order-1'
+        order.save(update_fields=['payment_method', 'razorpay_order_id'])
+        self.client.force_authenticate(user=self.customer)
+
+        with (
+            patch('restaurants.services.verify_razorpay_signature', return_value=True),
+            patch('orders.utils.notify_restaurant_owner') as send_notification,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self.client.post(
+                f'/api/restaurants/orders/{order.id}/verify-payment/',
+                {
+                    'razorpay_payment_id': 'razorpay-payment-1',
+                    'razorpay_signature': 'valid-signature',
+                },
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        order.refresh_from_db()
+        self.assertEqual(order.status, RestaurantOrder.Status.PLACED)
+        send_notification.assert_called_once()
+        self.assertEqual(
+            send_notification.call_args.args[0],
+            self.owner.id,
+        )
+
+    def test_accepting_order_assigns_and_notifies_driver(self):
+        order = self.create_order()
+        self.client.force_authenticate(user=self.owner)
+
+        with patch('orders.utils.notify_driver') as send_notification:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    f'/api/restaurants/partner/orders/{order.id}/status/',
+                    {'status': RestaurantOrder.Status.ACCEPTED},
+                    format='json',
+                )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        assignment = RestaurantDeliveryAssignment.objects.get(order=order)
+        self.assertEqual(assignment.driver, self.driver)
+        self.assertEqual(response.data['delivery_assignment']['driver_id'], self.driver.id)
+        send_notification.assert_called_once()
+        args = send_notification.call_args.args
+        self.assertEqual(args[0], self.driver.id)
+        self.assertEqual(args[1]['type'], 'restaurant_delivery_assigned')
+        self.assertEqual(args[1]['order_id'], str(order.id))
+
+    def test_driver_can_list_and_retrieve_assigned_restaurant_orders(self):
+        order = self.create_order(status=RestaurantOrder.Status.ACCEPTED)
+        RestaurantDeliveryAssignment.objects.create(order=order, driver=self.driver)
+        self.client.force_authenticate(user=self.driver)
+
+        list_response = self.client.get('/api/restaurants/driver/orders/')
+        detail_response = self.client.get(f'/api/restaurants/driver/orders/{order.id}/')
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data[0]['order_type'], 'restaurant')
+        self.assertEqual(list_response.data[0]['order_number'], order.order_number)
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data['restaurant']['name'], self.restaurant.name)
+
+    def test_accepting_order_reports_when_no_delivery_agent_is_online(self):
+        self.driver.is_online = False
+        self.driver.save(update_fields=['is_online'])
+        order = self.create_order()
+        self.client.force_authenticate(user=self.owner)
+
+        response = self.client.post(
+            f'/api/restaurants/partner/orders/{order.id}/status/',
+            {'status': RestaurantOrder.Status.ACCEPTED},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['delivery_assignment']['status'], 'unassigned')
+        self.assertFalse(RestaurantDeliveryAssignment.objects.filter(order=order).exists())
+
     def test_customer_cannot_patch_restaurant_through_public_api(self):
         restaurant = Restaurant.objects.create(
             owner=self.owner,
@@ -413,3 +590,58 @@ class PartnerRestaurantAPITests(TestCase):
         self.assertEqual(response.status_code, 403)
         restaurant.refresh_from_db()
         self.assertEqual(restaurant.name, 'Approved Restaurant')
+
+
+class RestaurantOwnerWebsocketTests(TransactionTestCase):
+    def setUp(self):
+        self.owner = get_user_model().objects.create_user(
+            username='restaurant-websocket-owner',
+            password='StrongPass123',
+            phone='9876543232',
+            role='RESTAURANT',
+        )
+        self.other_owner = get_user_model().objects.create_user(
+            username='restaurant-websocket-other',
+            password='StrongPass123',
+            phone='9876543233',
+            role='RESTAURANT',
+        )
+
+    def test_owner_receives_new_order_event_over_jwt_authenticated_websocket(self):
+        token = str(RefreshToken.for_user(self.owner).access_token)
+
+        async def exercise_socket():
+            communicator = WebsocketCommunicator(
+                URLRouter(websocket_urlpatterns),
+                f'/ws/restaurant-owner/{self.owner.id}/?token={token}',
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            await get_channel_layer().group_send(
+                f'restaurant_owner_{self.owner.id}',
+                {
+                    'type': 'new_order',
+                    'order': {'type': 'restaurant_order_placed', 'order_id': '42'},
+                },
+            )
+            event = await communicator.receive_json_from()
+            await communicator.disconnect()
+            return event
+
+        event = async_to_sync(exercise_socket)()
+        self.assertEqual(event['type'], 'new_order')
+        self.assertEqual(event['order']['type'], 'restaurant_order_placed')
+        self.assertEqual(event['order']['order_id'], '42')
+
+    def test_owner_cannot_subscribe_to_another_owners_order_events(self):
+        token = str(RefreshToken.for_user(self.owner).access_token)
+
+        async def exercise_socket():
+            communicator = WebsocketCommunicator(
+                URLRouter(websocket_urlpatterns),
+                f'/ws/restaurant-owner/{self.other_owner.id}/?token={token}',
+            )
+            return await communicator.connect()
+
+        connected, _ = async_to_sync(exercise_socket)()
+        self.assertFalse(connected)

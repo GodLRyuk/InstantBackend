@@ -5,11 +5,19 @@ from rest_framework import generics, mixins, status as http, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import services
-from .models import Cuisine, MenuCategory, MenuItem, Restaurant, RestaurantOrder
+from .models import (
+    Cuisine,
+    MenuCategory,
+    MenuItem,
+    Restaurant,
+    RestaurantDeliveryAssignment,
+    RestaurantOrder,
+)
 from .permissions import IsStaffUser
 from .serializers import (
     AdminRestaurantSerializer,
@@ -228,6 +236,7 @@ class CustomerOrderViewSet(
                 order.razorpay_payment_id = s.validated_data['razorpay_payment_id']
                 if order.status == S.AWAITING_PAYMENT:
                     order.status = S.PLACED
+                    services.notify_restaurant_owner_order_placed(order)
                 order.save()
         return Response(OrderSerializer(order, context={'request': request}).data)
 
@@ -351,7 +360,86 @@ class PartnerOrderViewSet(PartnerBaseMixin, OrderFilterMixin, viewsets.ReadOnlyM
             reason=s.validated_data.get('reason', ''),
             restaurant=self.restaurant,
         )
-        return Response(OrderSerializer(order, context={'request': request}).data)
+        data = OrderSerializer(order, context={'request': request}).data
+        if s.validated_data['status'] == S.ACCEPTED:
+            assignment = RestaurantDeliveryAssignment.objects.filter(order=order).first()
+            data['delivery_assignment'] = (
+                {
+                    'id': assignment.id,
+                    'driver_id': assignment.driver_id,
+                    'status': assignment.status,
+                }
+                if assignment
+                else {'status': 'unassigned', 'driver_id': None}
+            )
+        return Response(data)
+
+
+class RestaurantDriverOrdersView(APIView):
+    """Restaurant orders assigned to the authenticated delivery agent."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role not in ('DELIVERY', 'PICKUP'):
+            raise PermissionDenied('A delivery agent account is required.')
+        assignments = (
+            RestaurantDeliveryAssignment.objects.filter(driver=request.user)
+            .select_related('order', 'order__restaurant')
+            .prefetch_related('order__items')
+        )
+        return Response([self._serialize_assignment(assignment) for assignment in assignments])
+
+    @staticmethod
+    def _serialize_assignment(assignment):
+        order = assignment.order
+        return {
+            'assignment_id': assignment.id,
+            'order_type': 'restaurant',
+            'order_id': order.id,
+            'order_number': order.order_number,
+            'order_status': order.status,
+            'payment_status': order.payment_status,
+            'payment_method': order.payment_method,
+            'total_amount': order.total_amount,
+            'customer_name': order.customer_name,
+            'customer_phone': order.customer_phone,
+            'address': order.delivery_address,
+            'restaurant': {
+                'id': order.restaurant_id,
+                'name': order.restaurant.name,
+                'phone': order.restaurant.phone,
+                'address_line': order.restaurant.address_line,
+                'city': order.restaurant.city,
+            },
+            'items': [
+                {
+                    'name': item.name,
+                    'quantity': item.quantity,
+                    'is_veg': item.is_veg,
+                }
+                for item in order.items.all()
+            ],
+            'assigned_at': assignment.assigned_at,
+            'assignment_status': assignment.status,
+        }
+
+
+class RestaurantDriverOrderDetailView(APIView):
+    """Retrieve a restaurant order only when it is assigned to the current driver."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, order_id):
+        if request.user.role not in ('DELIVERY', 'PICKUP'):
+            raise PermissionDenied('A delivery agent account is required.')
+        assignment = get_object_or_404(
+            RestaurantDeliveryAssignment.objects.select_related('order', 'order__restaurant')
+            .prefetch_related('order__items'),
+            order_id=order_id,
+            driver=request.user,
+        )
+        return Response(RestaurantDriverOrdersView._serialize_assignment(assignment))
 
 
 # =========================================================== admin (Instant team)

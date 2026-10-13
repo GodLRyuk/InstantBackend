@@ -21,6 +21,19 @@ def notify_driver(driver_id, order_data):
     )
     print(f'📤 Notified driver {driver_id} about order {order_data["order_id"]}')
 
+
+def notify_restaurant_owner(owner_id, order_data):
+    """Push an order event to the restaurant owner's WebSocket group."""
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f'restaurant_owner_{owner_id}',
+        {
+            'type': 'new_order',
+            'order': order_data,
+        }
+    )
+
+
 def get_firebase_app():
     if not firebase_admin._apps:
         json_str = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON')

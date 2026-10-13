@@ -233,3 +233,20 @@ class RestaurantOrderItem(models.Model):
 
     def __str__(self):
         return f'{self.quantity} x {self.name}'
+
+
+class RestaurantDeliveryAssignment(models.Model):
+    order = models.OneToOneField(
+        RestaurantOrder, on_delete=models.CASCADE, related_name='delivery_assignment'
+    )
+    driver = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='restaurant_assignments'
+    )
+    status = models.CharField(max_length=30, default='ASSIGNED')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-assigned_at']
+
+    def __str__(self):
+        return f'{self.order_id} -> {self.driver_id}'
