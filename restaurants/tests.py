@@ -554,6 +554,42 @@ class RestaurantOrderDispatchTests(TestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(detail_response.data['restaurant']['name'], self.restaurant.name)
 
+    def test_driver_can_mark_assigned_restaurant_order_picked_up_and_delivered(self):
+        order = self.create_order(status=RestaurantOrder.Status.READY)
+        RestaurantDeliveryAssignment.objects.create(order=order, driver=self.driver)
+        self.client.force_authenticate(user=self.driver)
+
+        picked_up_response = self.client.post(
+            f'/api/restaurants/driver/orders/{order.id}/status/',
+            {'status': 'picked_up'},
+            format='json',
+        )
+        delivered_response = self.client.post(
+            f'/api/restaurants/driver/orders/{order.id}/status/',
+            {'status': 'delivered'},
+            format='json',
+        )
+
+        self.assertEqual(picked_up_response.status_code, 200, picked_up_response.data)
+        self.assertEqual(
+            picked_up_response.data['status'],
+            RestaurantOrder.Status.OUT_FOR_DELIVERY,
+        )
+        self.assertEqual(delivered_response.status_code, 200, delivered_response.data)
+        self.assertEqual(delivered_response.data['status'], RestaurantOrder.Status.DELIVERED)
+
+    def test_driver_cannot_update_unassigned_restaurant_order(self):
+        order = self.create_order(status=RestaurantOrder.Status.READY)
+        self.client.force_authenticate(user=self.driver)
+
+        response = self.client.post(
+            f'/api/restaurants/driver/orders/{order.id}/status/',
+            {'status': 'picked_up'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     def test_accepting_order_reports_when_no_delivery_agent_is_online(self):
         self.driver.is_online = False
         self.driver.save(update_fields=['is_online'])

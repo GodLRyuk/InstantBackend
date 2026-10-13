@@ -25,4 +25,9 @@ urlpatterns = [
         views.RestaurantDriverOrderDetailView.as_view(),
         name='restaurant-driver-order-detail',
     ),
+    path(
+        'driver/orders/<int:order_id>/status/',
+        views.RestaurantDriverOrderDetailView.as_view(),
+        name='restaurant-driver-order-status',
+    ),
 ] + router.urls
