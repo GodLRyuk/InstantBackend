@@ -557,6 +557,7 @@ class DriverOrderDetailAPIView(APIView):
                 "payment_status": order.payment_status,
                 "total_amount": order.total_amount,
                 "payment_method": order.payment_method,
+                "delivery_otp": order.delivery_otp,
 
                 # 👤 customer info
                 "customer": {
