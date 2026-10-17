@@ -1,5 +1,6 @@
 from datetime import time
 from decimal import Decimal
+import secrets
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -8,6 +9,10 @@ from django.db import models
 from django.utils import timezone
 
 from .utils import haversine_km
+
+
+def generate_delivery_otp():
+    return str(secrets.randbelow(900000) + 100000)
 
 
 class Cuisine(models.Model):
@@ -190,6 +195,8 @@ class RestaurantOrder(models.Model):
     )
     razorpay_order_id = models.CharField(max_length=60, blank=True)
     razorpay_payment_id = models.CharField(max_length=60, blank=True)
+    delivery_otp = models.CharField(max_length=6, default=generate_delivery_otp)
+    delivery_otp_verified = models.BooleanField(default=False)
 
     item_total = models.DecimalField(max_digits=10, decimal_places=2)
     discount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'))

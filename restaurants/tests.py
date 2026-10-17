@@ -554,6 +554,16 @@ class RestaurantOrderDispatchTests(TestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(detail_response.data['restaurant']['name'], self.restaurant.name)
 
+    def test_customer_can_read_restaurant_order_otp(self):
+        order = self.create_order()
+        self.client.force_authenticate(user=self.customer)
+
+        response = self.client.get(f'/api/restaurants/orders/{order.id}/')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertRegex(response.data['delivery_otp'], r'^\d{6}$')
+        self.assertEqual(response.data['delivery_otp'], order.delivery_otp)
+
     def test_driver_can_mark_assigned_restaurant_order_picked_up_and_delivered(self):
         order = self.create_order(status=RestaurantOrder.Status.READY)
         RestaurantDeliveryAssignment.objects.create(order=order, driver=self.driver)
@@ -566,7 +576,7 @@ class RestaurantOrderDispatchTests(TestCase):
         )
         delivered_response = self.client.post(
             f'/api/restaurants/driver/orders/{order.id}/status/',
-            {'status': 'delivered'},
+            {'status': 'delivered', 'otp': order.delivery_otp},
             format='json',
         )
 
@@ -577,6 +587,24 @@ class RestaurantOrderDispatchTests(TestCase):
         )
         self.assertEqual(delivered_response.status_code, 200, delivered_response.data)
         self.assertEqual(delivered_response.data['status'], RestaurantOrder.Status.DELIVERED)
+        order.refresh_from_db()
+        self.assertTrue(order.delivery_otp_verified)
+
+    def test_driver_cannot_deliver_restaurant_order_with_invalid_otp(self):
+        order = self.create_order(status=RestaurantOrder.Status.OUT_FOR_DELIVERY)
+        RestaurantDeliveryAssignment.objects.create(order=order, driver=self.driver)
+        self.client.force_authenticate(user=self.driver)
+
+        response = self.client.post(
+            f'/api/restaurants/driver/orders/{order.id}/status/',
+            {'status': 'delivered', 'otp': '000000' if order.delivery_otp != '000000' else '111111'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        order.refresh_from_db()
+        self.assertEqual(order.status, RestaurantOrder.Status.OUT_FOR_DELIVERY)
+        self.assertFalse(order.delivery_otp_verified)
 
     def test_driver_cannot_update_unassigned_restaurant_order(self):
         order = self.create_order(status=RestaurantOrder.Status.READY)
