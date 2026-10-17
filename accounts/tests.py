@@ -2,6 +2,8 @@ from django.test import TestCase, override_settings
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
+from orders.models import DeliveryAssignment, Order
+
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend', EMAIL_HOST_USER='noreply@example.com')
 class RegisterAPITest(TestCase):
@@ -156,3 +158,30 @@ class UserListAPITest(TestCase):
         response = self.client.get("/api/accounts/users/")
 
         self.assertEqual(response.status_code, 403)
+
+
+class DriverOrderDetailAPITest(TestCase):
+    def test_assigned_driver_order_detail_includes_delivery_otp(self):
+        user_model = get_user_model()
+        customer = user_model.objects.create_user(
+            username="otp-customer",
+            password="StrongPass123",
+            phone="9876543291",
+            role="CUSTOMER",
+        )
+        driver = user_model.objects.create_user(
+            username="otp-driver",
+            password="StrongPass123",
+            phone="9876543292",
+            role="DELIVERY",
+        )
+        order = Order.objects.create(user=customer, total_amount="10.00")
+        DeliveryAssignment.objects.create(order=order, driver=driver)
+        client = APIClient()
+        client.force_authenticate(user=driver)
+
+        response = client.get(f"/api/accounts/driver/order/{order.id}/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["delivery_otp"], order.delivery_otp)
+        self.assertRegex(response.data["delivery_otp"], r"^\d{6}$")
