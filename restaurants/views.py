@@ -403,6 +403,7 @@ class RestaurantDriverOrdersView(APIView):
             'payment_status': order.payment_status,
             'payment_method': order.payment_method,
             'total_amount': order.total_amount,
+            'delivery_otp': order.delivery_otp,
             'customer_name': order.customer_name,
             'customer_phone': order.customer_phone,
             'address': order.delivery_address,
