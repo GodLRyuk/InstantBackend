@@ -1,10 +1,15 @@
 from django.db import models
 from django.utils import timezone
+import secrets
 from products.models import Product
 from accounts.models import User
 from promotions.models import Coupon
 from addresses.models import Address
 from stock.models import StockBatch
+
+
+def generate_delivery_otp():
+    return str(secrets.randbelow(900000) + 100000)
 
 
 class Order(models.Model):
@@ -19,6 +24,8 @@ class Order(models.Model):
     driver_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     driver_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     cash_remitted = models.BooleanField(default=False)
+    delivery_otp = models.CharField(max_length=6, default=generate_delivery_otp)
+    delivery_otp_verified = models.BooleanField(default=False)
 
     # Payment status
     PAYMENT_STATUS_CHOICES = [

@@ -33,6 +33,7 @@ class OrderSerializer(serializers.ModelSerializer):
     razorpay_payment_id = serializers.CharField(read_only=True)
     address = serializers.SerializerMethodField()
     driver_id = serializers.SerializerMethodField()
+    delivery_otp = serializers.SerializerMethodField()
 
     def get_driver_id(self, obj):
         from orders.models import DeliveryAssignment
@@ -46,11 +47,17 @@ class OrderSerializer(serializers.ModelSerializer):
             'payment_status', 'order_status', 'created_at', 'items',
             'razorpay_order_id', 'razorpay_payment_id', 'address',
             'delivery_type', 'scheduled_date', 'scheduled_slot_start',
-            'scheduled_slot_end', 'driver_id',
+            'scheduled_slot_end', 'driver_id', 'delivery_otp',
         ]
 
     def get_address(self, obj):
         return obj.address_snapshot
+
+    def get_delivery_otp(self, obj):
+        request = self.context.get('request')
+        if request and request.user == obj.user:
+            return obj.delivery_otp
+        return None
 
 
 class CreateOrderItemSerializer(serializers.Serializer):
@@ -264,6 +271,7 @@ class CreateOrderSerializer(serializers.Serializer):
             "payment_method": payment_method,
             "payment_status": order.payment_status,
             "order_status": order.order_status,
+            "delivery_otp": order.delivery_otp,
             "pass_used": pass_active and delivery_fee == 0,
             "coupon_applied": applied_coupon.code if applied_coupon else None,
             "delivery_type": delivery_type,
@@ -328,4 +336,3 @@ class CashRemittanceSerializer(serializers.ModelSerializer):
             'status', 'recorded_by', 'recorded_by_name', 'recorded_at', 'notes', 'items'
         ]
         read_only_fields = ['status', 'recorded_by', 'recorded_at']
-

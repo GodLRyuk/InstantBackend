@@ -12,11 +12,9 @@ from rest_framework import serializers, status
 import hmac
 import hashlib
 from django.conf import settings
-from orders.models import Order, DeliveryAssignment
+from orders.models import Order, DeliveryAssignment, generate_delivery_otp
 from orders.services.driver_assignment import User, assign_driver
-from django.core.cache import cache
 from django.core.mail import send_mail
-import random
 from orders.utils import notify_driver
 from promotions.models import Coupon, CouponUsage
 from datetime import date, timedelta, timezone              # 👈 add
@@ -377,8 +375,12 @@ class SendDeliveryOtpAPIView(APIView):
                 status=403
             )
 
-        otp = str(random.randint(100000, 999999))
-        cache.set(f"delivery_otp:{pk}", otp, timeout=600)
+        if order.delivery_otp_verified:
+            return Response({"error": "Delivery OTP has already been verified"}, status=400)
+
+        if not order.delivery_otp:
+            order.delivery_otp = generate_delivery_otp()
+            order.save(update_fields=["delivery_otp"])
 
         customer_email = order.user.email
         customer_name  = order.user.username
@@ -388,7 +390,7 @@ class SendDeliveryOtpAPIView(APIView):
                 subject="Your Delivery OTP",
                 message=(
                     f"Hi {customer_name},\n\n"
-                    f"Your delivery OTP for Order #{pk} is: {otp}\n\n"
+                    f"Your delivery OTP for Order #{pk} is: {order.delivery_otp}\n\n"
                     f"Please share this with the delivery driver to complete your order.\n\n"
                     f"Do not share this with anyone else."
                 ),
@@ -396,7 +398,6 @@ class SendDeliveryOtpAPIView(APIView):
                 recipient_list=[customer_email],
             )
         except Exception as e:
-            cache.delete(f"delivery_otp:{pk}")
             return Response(
                 {"error": f"Failed to send OTP email: {str(e)}"},
                 status=500
@@ -416,20 +417,36 @@ class VerifyDeliveryOtpAPIView(APIView):
         if getattr(user, "role", None) not in ["DELIVERY", "ADMIN"] and not user.is_staff:
             return Response({"error": "Permission denied"}, status=403)
 
-        otp_input = request.data.get("otp")
+        try:
+            order = Order.objects.get(id=pk)
+        except Order.DoesNotExist:
+            return Response({"error": "Order not found"}, status=404)
+
+        assignment = DeliveryAssignment.objects.filter(
+            order=order, driver=user
+        ).first()
+        if not assignment:
+            return Response(
+                {"error": "You are not assigned to this order"},
+                status=403
+            )
+
+        otp_input = str(request.data.get("otp", ""))
 
         if not otp_input:
             return Response({"error": "OTP is required"}, status=400)
 
-        cached_otp = cache.get(f"delivery_otp:{pk}")
+        if len(otp_input) != 6 or not otp_input.isascii() or not otp_input.isdigit():
+            return Response({"error": "OTP must be a 6-digit number"}, status=400)
 
-        if not cached_otp:
-            return Response({"error": "OTP expired or not sent yet"}, status=400)
+        if order.delivery_otp_verified:
+            return Response({"error": "Delivery OTP has already been verified"}, status=400)
 
-        if str(cached_otp) != str(otp_input):
+        if not order.delivery_otp or not hmac.compare_digest(order.delivery_otp, otp_input):
             return Response({"error": "Invalid OTP"}, status=400)
 
-        cache.delete(f"delivery_otp:{pk}")
+        order.delivery_otp_verified = True
+        order.save(update_fields=["delivery_otp_verified"])
 
         return Response({"message": "OTP verified successfully"}, status=200)
 
