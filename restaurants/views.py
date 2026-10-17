@@ -1,6 +1,7 @@
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+import hmac
 from rest_framework import generics, mixins, status as http, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
@@ -461,6 +462,18 @@ class RestaurantDriverOrderDetailView(APIView):
             raise ValidationError({
                 'status': 'Expected either "picked_up" or "delivered".',
             })
+
+        if new_status == S.DELIVERED:
+            order = RestaurantOrder.objects.select_for_update().get(pk=order_id)
+            otp = request.data.get('otp')
+            if not isinstance(otp, str) or len(otp) != 6 or not otp.isascii() or not otp.isdigit():
+                raise ValidationError({'otp': 'A 6-digit OTP is required to complete delivery.'})
+            if not hmac.compare_digest(order.delivery_otp, otp):
+                raise ValidationError({'otp': 'Invalid delivery OTP.'})
+            if order.delivery_otp_verified:
+                raise ValidationError({'otp': 'Delivery OTP has already been used.'})
+            order.delivery_otp_verified = True
+            order.save(update_fields=['delivery_otp_verified'])
 
         order = services.change_status(
             order_id,

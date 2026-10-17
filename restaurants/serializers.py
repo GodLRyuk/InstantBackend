@@ -149,6 +149,7 @@ class OrderSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source='get_status_display', read_only=True)
     payment_method_label = serializers.CharField(source='get_payment_method_display', read_only=True)
     payment_status_label = serializers.CharField(source='get_payment_status_display', read_only=True)
+    delivery_otp = serializers.SerializerMethodField()
 
     class Meta:
         model = RestaurantOrder
@@ -158,9 +159,15 @@ class OrderSerializer(serializers.ModelSerializer):
             'items', 'item_total', 'discount', 'delivery_fee', 'packaging_charge', 'gst',
             'total_amount', 'offer_code', 'customer_name', 'customer_phone',
             'delivery_address', 'delivery_lat', 'delivery_lng', 'notes', 'rejection_reason',
-            'razorpay_order_id', 'created_at', 'updated_at',
+            'razorpay_order_id', 'created_at', 'updated_at', 'delivery_otp',
         ]
         read_only_fields = fields
+
+    def get_delivery_otp(self, obj):
+        request = self.context.get('request')
+        if request and request.user == obj.customer:
+            return obj.delivery_otp
+        return None
 
     def get_restaurant(self, obj):
         r = obj.restaurant
