@@ -551,8 +551,10 @@ class RestaurantOrderDispatchTests(TestCase):
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(list_response.data[0]['order_type'], 'restaurant')
         self.assertEqual(list_response.data[0]['order_number'], order.order_number)
+        self.assertEqual(list_response.data[0]['delivery_otp'], order.delivery_otp)
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(detail_response.data['restaurant']['name'], self.restaurant.name)
+        self.assertEqual(detail_response.data['delivery_otp'], order.delivery_otp)
 
     def test_customer_can_read_restaurant_order_otp(self):
         order = self.create_order()
