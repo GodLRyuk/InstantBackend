@@ -5,7 +5,21 @@ from decimal import Decimal
 from reviews.serializers import ProductReviewSerializer
 
 
+MAX_PRODUCT_IMAGE_SIZE = 10 * 1024 * 1024
+
+
+class ProductImageField(serializers.ImageField):
+    def to_internal_value(self, data):
+        size = getattr(data, "size", None)
+        if size is not None and size > MAX_PRODUCT_IMAGE_SIZE:
+            raise serializers.ValidationError("Image must be 10 MB or smaller.")
+        return super().to_internal_value(data)
+
+
 class ProductSerializer(serializers.ModelSerializer):
+    image = ProductImageField(required=False, allow_null=True)
+    category_id = serializers.IntegerField(source="category.id", read_only=True)
+    subcategory_id = serializers.IntegerField(source="subcategory.id", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
     subcategory_name = serializers.CharField(source="subcategory.name", read_only=True)
     brand_name = serializers.CharField(source="brand.name", read_only=True, default=None)
@@ -22,8 +36,8 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            "id", "name", "category", "category_name",
-            "subcategory", "subcategory_name",
+            "id", "name", "category", "category_id", "category_name",
+            "subcategory", "subcategory_id", "subcategory_name",
             "brand", "brand_name",
             "unit", "unit_name", "unit_size",
             "price", "discount_percent",
@@ -34,6 +48,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "description",
             "is_active", "created_at","reviews","average_rating","review_count"
         ]
+
     def get_discounted_price(self, obj):
         return float(obj.discounted_price())
 
@@ -69,6 +84,8 @@ class ProductSerializer(serializers.ModelSerializer):
         return obj.reviews.count()
 
 class ProductListSerializer(serializers.ModelSerializer):
+    category_id = serializers.IntegerField(source="category.id", read_only=True)
+    subcategory_id = serializers.IntegerField(source="subcategory.id", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
     subcategory_name = serializers.CharField(source="subcategory.name", read_only=True)
     brand_name = serializers.CharField(source="brand.name", read_only=True)
@@ -83,8 +100,10 @@ class ProductListSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "category",
+            "category_id",
             "category_name",
             "subcategory",
+            "subcategory_id",
             "subcategory_name",
             "brand",
             "brand_name",
