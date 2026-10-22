@@ -19,11 +19,18 @@ client = razorpay.Client(auth=(django_settings.RAZORPAY_KEY_ID, django_settings.
 
 class OrderItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
+    subcategory = serializers.IntegerField(source='product.subcategory_id', read_only=True)
+    subcategory_id = serializers.IntegerField(source='product.subcategory_id', read_only=True)
+    subcategory_name = serializers.CharField(source='product.subcategory.name', read_only=True)
     batch_no = serializers.CharField(source='batch.batch_no', read_only=True)
 
     class Meta:
         model = OrderItem
-        fields = ['id', 'product', 'product_name', 'quantity', 'price', 'total_price', 'batch', 'batch_no']
+        fields = [
+            'id', 'product', 'product_name', 'subcategory', 'subcategory_id',
+            'subcategory_name', 'quantity', 'price', 'total_price', 'batch',
+            'batch_no',
+        ]
 
 
 class OrderSerializer(serializers.ModelSerializer):
