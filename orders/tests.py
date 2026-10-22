@@ -2,7 +2,45 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from accounts.models import User
-from orders.models import DeliveryAssignment, Order
+from masters.models import Category, SubCategory, Unit
+from orders.models import DeliveryAssignment, Order, OrderItem
+from orders.serializers import OrderItemSerializer
+from products.models import Product
+
+
+class OrderItemSerializerTests(TestCase):
+    def test_order_item_includes_product_subcategory(self):
+        user = User.objects.create_user(
+            username="order-customer",
+            email="order-customer@example.com",
+            password="test-password",
+            phone="3333333333",
+            role="CUSTOMER",
+        )
+        category = Category.objects.create(name="Food")
+        subcategory = SubCategory.objects.create(name="Dairy", category=category)
+        unit = Unit.objects.create(name="Piece", short_name="pc")
+        product = Product.objects.create(
+            name="Butter",
+            category=category,
+            subcategory=subcategory,
+            unit=unit,
+            price="19.20",
+        )
+        order = Order.objects.create(user=user, total_amount="19.20")
+        item = OrderItem.objects.create(
+            order=order,
+            product=product,
+            quantity=1,
+            price="19.20",
+            total_price="19.20",
+        )
+
+        data = OrderItemSerializer(item).data
+
+        self.assertEqual(data["subcategory"], subcategory.id)
+        self.assertEqual(data["subcategory_id"], subcategory.id)
+        self.assertEqual(data["subcategory_name"], "Dairy")
 
 
 class DeliveryOtpTests(TestCase):

@@ -30,12 +30,12 @@ class OrderListView(ListAPIView):
         user = self.request.user
 
         if user.is_staff or getattr(user, "role", None) == "ADMIN":
-            return Order.objects.all().prefetch_related('items__product').order_by('-id')
+            return Order.objects.all().prefetch_related('items__product__subcategory').order_by('-id')
 
         elif getattr(user, "role", None) == "DRIVER":
-            return Order.objects.filter(driver=user).prefetch_related('items__product').order_by('-id')
+            return Order.objects.filter(driver=user).prefetch_related('items__product__subcategory').order_by('-id')
 
-        return Order.objects.filter(user=user).prefetch_related('items__product').order_by('-id')
+        return Order.objects.filter(user=user).prefetch_related('items__product__subcategory').order_by('-id')
 
 
 class OrderDetailView(RetrieveAPIView):
@@ -46,12 +46,12 @@ class OrderDetailView(RetrieveAPIView):
         user = self.request.user
 
         if user.is_staff or getattr(user, "role", None) == "ADMIN":
-            return Order.objects.all()
+            return Order.objects.all().prefetch_related('items__product__subcategory')
 
         elif getattr(user, "role", None) == "DRIVER":
-            return Order.objects.filter(driver=user)
+            return Order.objects.filter(driver=user).prefetch_related('items__product__subcategory')
 
-        return Order.objects.filter(user=user)
+        return Order.objects.filter(user=user).prefetch_related('items__product__subcategory')
 
 
 class CancelOrderView(APIView):
