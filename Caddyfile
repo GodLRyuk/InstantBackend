@@ -9,7 +9,9 @@ api.instantdelivery.cloud {
 
 	# Everything else (API, WebSockets, Django admin, static files)
 	handle {
-		reverse_proxy web:8000
+		reverse_proxy web:8000 {
+			header_up X-Real-IP {remote_host}
+		}
 	}
 }
 

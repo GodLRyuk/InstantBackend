@@ -2,6 +2,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
@@ -15,9 +17,26 @@ from django.core.mail import send_mail
 from orders.models import Order, DeliveryAssignment
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
+from accounts.login_security import (
+    prepare_login_attempt,
+    record_failed_login,
+)
 
 
 User = get_user_model()
+
+
+def _begin_login_attempt(request, identifier):
+    attempt = prepare_login_attempt(request, identifier)
+    if attempt.retry_after is None:
+        return attempt, None
+
+    response = Response(
+        {"error": "Too many login attempts. Try again later."},
+        status=status.HTTP_429_TOO_MANY_REQUESTS,
+    )
+    response["Retry-After"] = str(attempt.retry_after)
+    return attempt, response
 
 
 class AdminLoginAPIView(APIView):
@@ -25,6 +44,9 @@ class AdminLoginAPIView(APIView):
     def post(self, request):
         email = request.data.get('email')
         password = request.data.get('password')
+        attempt, blocked_response = _begin_login_attempt(request, email)
+        if blocked_response:
+            return blocked_response
 
         if not email or not password:
             return Response({'error': 'Email and password required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -33,6 +55,7 @@ class AdminLoginAPIView(APIView):
         user = authenticate(request, username=username, password=password)
 
         if user is None:
+            record_failed_login(attempt)
             return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
         is_restaurant = user.role == "RESTAURANT"
@@ -59,11 +82,22 @@ class CustomerLoginAPIView(APIView):
     def post(self, request):
 
         email = request.data.get("email")
+
         password = request.data.get("password")
+        attempt, blocked_response = _begin_login_attempt(request, email)
+        if blocked_response:
+            return blocked_response
+
+        if not email or not password:
+            return Response(
+                {"error": "Email and password required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         user = authenticate(request, username=email, password=password)
 
         if user is None:
+            record_failed_login(attempt)
             return Response({"error": "Invalid credentials"}, status=401)
 
         if user.role != "CUSTOMER":
@@ -115,6 +149,11 @@ class RegisterAPIView(APIView):
                 {"error": "username, first name, last name, email, password and phone are required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        try:
+            validate_password(password)
+        except ValidationError as exc:
+            return Response({"error": exc.messages}, status=status.HTTP_400_BAD_REQUEST)
 
         if User.objects.filter(email=email).exists():
             return Response({"error": "Email already exists"}, status=400)
@@ -385,6 +424,11 @@ class ChangePasswordAPIView(APIView):
         if not user.check_password(old_password):
             return Response({"error": "Old password is incorrect"}, status=400)
 
+        try:
+            validate_password(new_password, user)
+        except ValidationError as exc:
+            return Response({"error": exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+
         # ✅ Set new password (IMPORTANT: use set_password)
         user.set_password(new_password)
         user.save()
@@ -485,6 +529,9 @@ class DriverLoginAPIView(APIView):
     def post(self, request):
         username = request.data.get('username')
         password = request.data.get('password')
+        attempt, blocked_response = _begin_login_attempt(request, username)
+        if blocked_response:
+            return blocked_response
 
         if not username or not password:
             return Response(
@@ -500,6 +547,7 @@ class DriverLoginAPIView(APIView):
         )
 
         if user is None:
+            record_failed_login(attempt)
             return Response(
                 {'error': 'Invalid credentials'},
                 status=status.HTTP_401_UNAUTHORIZED
