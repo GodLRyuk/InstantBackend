@@ -1,7 +1,9 @@
 from django.test import TestCase, override_settings
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from rest_framework.test import APIClient
 
+from accounts.login_security import LoginAttempt, prepare_login_attempt, record_failed_login
 from orders.models import DeliveryAssignment, Order
 
 
@@ -96,6 +98,134 @@ class AdminLoginAPITest(TestCase):
         django_admin_response = self.client.get('/admin/')
         self.assertEqual(django_admin_response.status_code, 302)
         self.assertIn('/admin/login/', django_admin_response['Location'])
+
+
+@override_settings(
+    CACHES={
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'login-security-tests',
+        },
+    },
+)
+class LoginSecurityTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = get_user_model().objects.create_user(
+            username='security-admin',
+            email='security-admin@example.com',
+            password='StrongPass123',
+            phone='9876543299',
+            role='ADMIN',
+            is_staff=True,
+        )
+        self.client = APIClient()
+
+    def login(self, ip_address, password='WrongPass123'):
+        return self.client.post(
+            '/api/accounts/admin-login/',
+            {'email': self.user.email, 'password': password},
+            format='json',
+            HTTP_X_REAL_IP=ip_address,
+        )
+
+    def test_five_failures_lock_account_from_that_ip_even_with_correct_password(self):
+        for _ in range(5):
+            self.assertEqual(self.login('192.0.2.10').status_code, 401)
+
+        self.assertEqual(
+            self.login('192.0.2.10', password='StrongPass123').status_code,
+            429,
+        )
+        self.assertEqual(
+            self.login('192.0.2.11', password='StrongPass123').status_code,
+            200,
+        )
+
+    def test_failures_from_many_ips_lock_username(self):
+        username = self.user.username.casefold()
+        for index in range(30):
+            record_failed_login(LoginAttempt(f'192.0.2.{index + 1}', username))
+
+        attempt = prepare_login_attempt(
+            self.client.post(
+                '/api/accounts/admin-login/',
+                {'email': self.user.email, 'password': 'StrongPass123'},
+                format='json',
+                HTTP_X_REAL_IP='198.51.100.10',
+            ).wsgi_request,
+            self.user.email,
+        )
+
+        self.assertEqual(attempt.retry_after, 15 * 60)
+
+    def test_twenty_failures_lock_ip_across_usernames(self):
+        for index in range(20):
+            record_failed_login(LoginAttempt('192.0.2.20', f'user-{index}'))
+
+        request = self.client.post(
+            '/api/accounts/admin-login/',
+            {'email': 'another-user@example.com', 'password': 'StrongPass123'},
+            format='json',
+            HTTP_X_REAL_IP='192.0.2.20',
+        ).wsgi_request
+        self.assertEqual(prepare_login_attempt(request, 'another-user@example.com').retry_after, 15 * 60)
+
+    def test_login_rate_limits_are_scoped_to_ip_and_username(self):
+        for index in range(20):
+            response = self.client.post(
+                '/api/accounts/admin-login/',
+                {'email': f'unknown-{index}@example.com'},
+                format='json',
+                HTTP_X_REAL_IP='192.0.2.30',
+            )
+            self.assertEqual(response.status_code, 400)
+
+        response = self.client.post(
+            '/api/accounts/admin-login/',
+            {'email': 'last-unknown@example.com'},
+            format='json',
+            HTTP_X_REAL_IP='192.0.2.30',
+        )
+        self.assertEqual(response.status_code, 429)
+
+        cache.clear()
+        for index in range(10):
+            response = self.client.post(
+                '/api/accounts/admin-login/',
+                {'email': 'same-unknown@example.com'},
+                format='json',
+                HTTP_X_REAL_IP=f'198.51.100.{index + 1}',
+            )
+            self.assertEqual(response.status_code, 400)
+
+        response = self.client.post(
+            '/api/accounts/admin-login/',
+            {'email': 'same-unknown@example.com'},
+            format='json',
+            HTTP_X_REAL_IP='203.0.113.1',
+        )
+        self.assertEqual(response.status_code, 429)
+
+    def test_registration_rejects_passwords_shorter_than_twelve_characters(self):
+        response = self.client.post(
+            '/api/accounts/register/',
+            {
+                'username': 'short-password',
+                'first_name': 'Short',
+                'last_name': 'Password',
+                'email': 'short-password@example.com',
+                'password': 'Short123',
+                'phone': '9876543288',
+                'role': 'CUSTOMER',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            get_user_model().objects.filter(username='short-password').exists()
+        )
 
 
 class UserListAPITest(TestCase):

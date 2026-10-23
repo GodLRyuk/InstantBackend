@@ -8,6 +8,7 @@ from datetime import timedelta
 import os
 import dj_database_url
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -22,11 +23,16 @@ def env_list(name, default=''):
     return [v.strip() for v in os.environ.get(name, default).split(',') if v.strip()]
 
 
-SECRET_KEY = os.environ.get(
-    'SECRET_KEY',
-    'django-insecure-mp56rby*-))lnx(!ui%#^28vv=l&thol6$eop!0i4#e5yij1z$',
-)
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+_DEVELOPMENT_SECRET_KEY = 'django-insecure-development-only'
+SECRET_KEY = os.environ.get('SECRET_KEY', _DEVELOPMENT_SECRET_KEY)
+
+if not DEBUG and (
+    not SECRET_KEY
+    or SECRET_KEY == _DEVELOPMENT_SECRET_KEY
+    or SECRET_KEY.startswith('django-insecure-')
+):
+    raise ImproperlyConfigured('Set a unique, secure SECRET_KEY when DEBUG is False.')
 
 ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', '*')
 CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
@@ -65,6 +71,8 @@ INSTALLED_APPS = [
     "store_timing",
     "restaurants",
 ]
+
+LOGIN_CLIENT_IP_HEADER = os.environ.get('LOGIN_CLIENT_IP_HEADER', 'HTTP_X_REAL_IP')
 
 AUTH_USER_MODEL = 'accounts.User'
 ASGI_APPLICATION = 'config.asgi.application'
@@ -118,7 +126,10 @@ DATABASES = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {
+        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {'min_length': 12},
+    },
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
@@ -128,6 +139,13 @@ AUTH_PASSWORD_VALIDATORS = [
 REDIS_URL = os.environ.get('REDIS_URL')
 
 if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+            'KEY_PREFIX': 'instant',
+        },
+    }
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -135,6 +153,15 @@ if REDIS_URL:
         },
     }
 else:
+    if not DEBUG:
+        raise ImproperlyConfigured('Set REDIS_URL when DEBUG is False.')
+
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'instant-development',
+        },
+    }
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels.layers.InMemoryChannelLayer",
