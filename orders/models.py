@@ -76,6 +76,15 @@ class Order(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     address_snapshot = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=['order_status', 'payment_status', 'created_at'],
+                name='orders_sales_status_date_idx',
+            ),
+        ]
+
     # ---------------------- PAYMENT STATUS METHODS ----------------------
 
     def mark_paid(self):

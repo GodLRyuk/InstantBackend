@@ -35,6 +35,7 @@ urlpatterns = [
     path('api/promotions/', include('promotions.urls')), 
     path('api/wishlist/', include('wishlist.urls')),
     path('api/reports/', include('reports.urls')),
+    path('api/analytics/', include('analytics.urls')),
     path("api/picker/", include("store_picker.urls")),
     path("api/expenses/", include("expenses.urls")),
     path("api/store/", include("store_timing.urls")),
