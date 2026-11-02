@@ -25,7 +25,7 @@ Product searches record a normalized query and result count. Cart additions reco
 The report APIs can ask **Ollama with `llama3.2:3b`** to calculate report values from sanitized order/item or inventory records. The exact Django calculations remain in the existing response fields; the additional `ollama_calculation.result` contains the model's independent calculation and `matches_backend` shows whether it agrees. Model-generated numbers may be wrong, so the exact backend fields remain the reliable values.
 
 - Set `AI_REPORTS_ENABLED=True` to add Ollama calculations to overview, sales summary, top products, and inventory insights. It is disabled by default.
-- The assistant endpoint continues to require `AI_ASSISTANT_ENABLED=True`; when enabled it returns both the plain-language answer and an Ollama calculation.
+- The assistant endpoint is enabled by default (`AI_ASSISTANT_ENABLED=True`); when enabled it returns both the plain-language answer and an Ollama calculation.
 - Ollama receives only the fields needed for these reports. Order/customer identifiers, emails, addresses, payment credentials, delivery details, and free-text assistant questions are not included in calculation records.
 - A calculation is limited to 1,000 order, item, and inventory records. Larger reports return HTTP 413 rather than silently truncating data. An Ollama timeout returns 504; provider or invalid-output failures return 502.
 - Local `llama3.2:3b` testing matched the sample sales totals and top-product ranking, but produced incorrect inventory sums. Use `matches_backend` to spot differences; the exact backend fields remain authoritative.

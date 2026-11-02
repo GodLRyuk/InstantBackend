@@ -357,7 +357,8 @@ class DemandSignalTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
 
-    def test_assistant_is_disabled_by_default(self):
+    @override_settings(AI_ASSISTANT_ENABLED=False)
+    def test_assistant_can_be_disabled(self):
         response = self.client.post(
             '/api/analytics/assistant/ask/',
             {'question': 'Summarize sales'},
