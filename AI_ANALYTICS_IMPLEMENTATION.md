@@ -20,15 +20,15 @@ Analytics routes are mounted at `/api/analytics/`. Every endpoint requires an au
 
 Product searches record a normalized query and result count. Cart additions record product and quantity. These signals do not contain customer identity, addresses, or payment details. Email addresses and phone-like values are removed from search phrases. If recording a signal fails, the user-facing search/cart action continues and the failure is logged.
 
-## How AI analysis works
+## How AI calculations work
 
-The assistant uses **Ollama with `llama3.2:3b`** when enabled. It is not used to calculate sales or inventory figures: Django calculates those deterministically, then supplies a limited aggregate summary to the model for a plain-language explanation.
+The report APIs can ask **Ollama with `llama3.2:3b`** to calculate report values from sanitized order/item or inventory records. The exact Django calculations remain in the existing response fields; the additional `ollama_calculation.result` contains the model's independent calculation and `matches_backend` shows whether it agrees. Model-generated numbers may be wrong, so the exact backend fields remain the reliable values.
 
-- The assistant is disabled unless `AI_ASSISTANT_ENABLED=True`.
-- Only a bounded, allowlisted analytics summary is sent to Ollama. The free-text question is used locally to select `overview`, `sales`, `top_products`, or `inventory`; the question itself is not sent to the model.
-- The model has no database connection, SQL tool, business-record mutation tools, customer records, or payment information.
-- The answer is returned alongside the aggregate data so the dashboard can show what it is based on.
-- A disabled assistant returns HTTP 503; an unavailable/invalid model response returns 502; a timeout returns 504. Other analytics endpoints do not depend on Ollama.
+- Set `AI_REPORTS_ENABLED=True` to add Ollama calculations to overview, sales summary, top products, and inventory insights. It is disabled by default.
+- The assistant endpoint continues to require `AI_ASSISTANT_ENABLED=True`; when enabled it returns both the plain-language answer and an Ollama calculation.
+- Ollama receives only the fields needed for these reports. Order/customer identifiers, emails, addresses, payment credentials, delivery details, and free-text assistant questions are not included in calculation records.
+- A calculation is limited to 1,000 order, item, and inventory records. Larger reports return HTTP 413 rather than silently truncating data. An Ollama timeout returns 504; provider or invalid-output failures return 502.
+- Local `llama3.2:3b` testing matched the sample sales totals and top-product ranking, but produced incorrect inventory sums. Use `matches_backend` to spot differences; the exact backend fields remain authoritative.
 - Ollama is reachable over the private Docker Compose network in the optional `ai` profile and is not published on a public host port.
 
 Example request:
@@ -70,7 +70,7 @@ Supported intent keywords include stock/inventory, top or best-selling products,
 GET /api/analytics/overview/?start_date=2026-10-04&end_date=2026-11-02
 ```
 
-Returns `sales_definitions`, `sales` totals, and current `inventory` totals.
+Returns `sales_definitions`, exact `sales` totals, current `inventory` totals, and—when enabled—`ollama_calculation`. Its `result` contains model-calculated sales and inventory totals.
 
 ### Sales summary
 
@@ -80,6 +80,8 @@ GET /api/analytics/sales-summary/?start_date=2026-10-04&end_date=2026-11-02&grou
 
 `group_by` is `day`, `week`, or `month`. The response contains totals, period rows, and definitions. Weekly periods start Monday; monthly periods start on day one. A boundary period can start before the requested date.
 
+When AI reports are enabled, `ollama_calculation.result.totals` is the model's separate calculation from the underlying order/item records.
+
 ### Top products
 
 ```text
@@ -88,6 +90,8 @@ GET /api/analytics/top-products/?start_date=2026-10-04&end_date=2026-11-02&limit
 
 `limit` is 1–100. `sort_by` is `revenue` or `quantity`. Each result includes `product_id`, `product_name`, `units_sold`, and `item_subtotal`.
 
+When AI reports are enabled, `ollama_calculation.result.results` contains the model's ranking/calculations from delivered, paid order items.
+
 ### Inventory insights
 
 ```text
@@ -95,6 +99,8 @@ GET /api/analytics/inventory-insights/?limit=50&offset=0
 ```
 
 Returns DRF limit-offset pagination: `count`, `next`, `previous`, `results`, and `low_stock_count`. Page size is 1–100. The complete result set is ordered by available stock ascending, then product name. `low_stock_count` is across all inventory, not just the current page.
+
+When AI reports are enabled, `ollama_calculation.result.inventory` is calculated from all inventory rows, not just the current page.
 
 ### Demand forecast
 
@@ -196,7 +202,7 @@ Import `HttpClient` and `HttpParams` from `@angular/common/http` and use the Ang
 
 ## Enable Ollama locally on Mac
 
-On this development machine, Ollama is installed and running, `llama3.2:3b` has been downloaded, and a real request through the Django provider returned the supplied sample figures with the currency preserved. This verifies local inference only; it does not install or configure Ollama on the production server.
+On this development machine, Ollama is installed and running, `llama3.2:3b` has been downloaded, and real requests through the Django provider were tested against sample reports. The model matched sample sales totals and product ranking, but not inventory sums. This verifies local inference only; it does not install or configure Ollama on the production server.
 
 On another Mac, install Ollama and download the selected model:
 
@@ -210,6 +216,7 @@ Set these variables in the local, untracked environment file read by Django:
 
 ```dotenv
 AI_ASSISTANT_ENABLED=True
+AI_REPORTS_ENABLED=True
 AI_PROVIDER=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.2:3b
@@ -225,6 +232,7 @@ Set these values in the server's existing `.env`:
 
 ```dotenv
 AI_ASSISTANT_ENABLED=True
+AI_REPORTS_ENABLED=True
 AI_PROVIDER=ollama
 OLLAMA_BASE_URL=http://ollama:11434
 OLLAMA_MODEL=llama3.2:3b
@@ -252,7 +260,7 @@ Backend validation previously passed:
 
 ```text
 python3 manage.py test analytics.tests cart.tests orders.tests
-Ran 29 tests — OK
+Ran 32 tests — OK
 python3 manage.py check
 System check identified no issues
 python3 manage.py makemigrations --check --dry-run
