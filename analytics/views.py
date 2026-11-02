@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.db.models import F
 from django.utils import timezone
+from rest_framework.exceptions import APIException
 from rest_framework import serializers
 from rest_framework.generics import ListAPIView
 from rest_framework.pagination import LimitOffsetPagination
@@ -37,12 +38,65 @@ from .services.demand_forecasting import (
     build_demand_forecasts,
 )
 from .services.ai_assistant import (
+    AssistantInputTooLarge,
     AssistantProviderError,
     AssistantProviderTimeout,
     OllamaProvider,
     build_approved_analytics_data,
+    build_calculation_records,
     classify_analytics_intent,
 )
+
+
+class OllamaCalculationTooLarge(APIException):
+    status_code = 413
+    default_detail = 'The report is too large for a single Ollama calculation.'
+    default_code = 'ollama_calculation_too_large'
+
+
+class OllamaCalculationTimeout(APIException):
+    status_code = 504
+    default_detail = 'The local AI model timed out. Please try again.'
+    default_code = 'ollama_calculation_timeout'
+
+
+class OllamaCalculationUnavailable(APIException):
+    status_code = 502
+    default_detail = 'The local AI model is unavailable or returned an invalid calculation.'
+    default_code = 'ollama_calculation_unavailable'
+
+
+def _ollama_calculation(
+    intent,
+    start_date,
+    end_date,
+    backend_calculation,
+    *,
+    group_by='day',
+    sort_by='revenue',
+    limit=10,
+):
+    try:
+        records = build_calculation_records(
+            intent,
+            start_date,
+            end_date,
+            group_by=group_by,
+            sort_by=sort_by,
+            limit=limit,
+        )
+        return OllamaProvider().calculate_report(
+            intent,
+            records,
+            backend_calculation=backend_calculation,
+            limit=limit,
+        )
+    except AssistantInputTooLarge as exc:
+        raise OllamaCalculationTooLarge(str(exc)) from exc
+    except AssistantProviderTimeout as exc:
+        raise OllamaCalculationTimeout from exc
+    except AssistantProviderError as exc:
+        raise OllamaCalculationUnavailable from exc
 
 
 class DemandSignalListAPIView(ListAPIView):
@@ -67,13 +121,23 @@ class OverviewAPIView(APIView):
             date_range['start_date'],
             date_range['end_date'],
         )
-        return Response({
+        inventory = get_inventory_overview()
+        response_data = {
             'start_date': date_range['start_date'].isoformat(),
             'end_date': date_range['end_date'].isoformat(),
             'sales_definitions': SALES_DEFINITIONS,
             'sales': sales['totals'],
-            'inventory': get_inventory_overview(),
-        })
+            'inventory': inventory,
+        }
+        response = Response(response_data)
+        if settings.AI_REPORTS_ENABLED:
+            response.data['ollama_calculation'] = _ollama_calculation(
+                'overview',
+                date_range['start_date'],
+                date_range['end_date'],
+                {'sales': sales['totals'], 'inventory': inventory},
+            )
+        return response
 
 
 class SalesSummaryAPIView(APIView):
@@ -82,7 +146,17 @@ class SalesSummaryAPIView(APIView):
     def get(self, request):
         filters = SalesSummaryFilterSerializer(data=request.query_params)
         filters.is_valid(raise_exception=True)
-        return Response(get_sales_summary(**filters.validated_data))
+        data = get_sales_summary(**filters.validated_data)
+        response = Response(data)
+        if settings.AI_REPORTS_ENABLED:
+            response.data['ollama_calculation'] = _ollama_calculation(
+                'sales',
+                filters.validated_data['start_date'],
+                filters.validated_data['end_date'],
+                {'totals': data['totals']},
+                group_by=filters.validated_data['group_by'],
+            )
+        return response
 
 
 class TopProductsAPIView(APIView):
@@ -92,18 +166,29 @@ class TopProductsAPIView(APIView):
         filters = TopProductsFilterSerializer(data=request.query_params)
         filters.is_valid(raise_exception=True)
         data = filters.validated_data
-        return Response({
+        results = get_top_products(
+            data['start_date'],
+            data['end_date'],
+            limit=data['limit'],
+            sort_by=data['sort_by'],
+        )
+        response = Response({
             'start_date': data['start_date'].isoformat(),
             'end_date': data['end_date'].isoformat(),
             'sort_by': data['sort_by'],
             'sales_definitions': SALES_DEFINITIONS,
-            'results': get_top_products(
+            'results': results,
+        })
+        if settings.AI_REPORTS_ENABLED:
+            response.data['ollama_calculation'] = _ollama_calculation(
+                'top_products',
                 data['start_date'],
                 data['end_date'],
-                limit=data['limit'],
+                {'results': results},
                 sort_by=data['sort_by'],
-            ),
-        })
+                limit=data['limit'],
+            )
+        return response
 
 
 class DemandForecastPagination(LimitOffsetPagination):
@@ -185,14 +270,33 @@ class AnalyticsAssistantAPIView(APIView):
                 status=502,
             )
 
-        return Response({
+        response_data = {
             'answer': answer,
             'intent': intent,
             'start_date': data['start_date'].isoformat(),
             'end_date': data['end_date'].isoformat(),
             'model': settings.OLLAMA_MODEL,
             'data': analytics_data,
-        })
+        }
+        if intent == 'overview':
+            backend_calculation = {
+                'sales': analytics_data['sales'],
+                'inventory': analytics_data['inventory'],
+            }
+        elif intent == 'sales':
+            backend_calculation = {'totals': analytics_data['totals']}
+        elif intent == 'top_products':
+            backend_calculation = {'results': analytics_data['top_products']}
+        else:
+            backend_calculation = {'inventory': analytics_data['inventory']}
+        response_data['ollama_calculation'] = _ollama_calculation(
+            intent,
+            data['start_date'],
+            data['end_date'],
+            backend_calculation,
+            limit=5 if intent == 'top_products' else 10,
+        )
+        return Response(response_data)
 
 
 class InventoryInsightsPagination(LimitOffsetPagination):
@@ -247,3 +351,15 @@ class InventoryInsightsAPIView(ListAPIView):
             .annotate(available_stock=F('total_stock') - F('reserved_stock'))
             .order_by('available_stock', 'product__name', 'id')
         )
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        if settings.AI_REPORTS_ENABLED:
+            today = timezone.localdate()
+            response.data['ollama_calculation'] = _ollama_calculation(
+                'inventory',
+                today,
+                today,
+                {'inventory': get_inventory_overview()},
+            )
+        return response

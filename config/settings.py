@@ -207,6 +207,7 @@ RAZORPAY_SECRET = os.environ.get('RAZORPAY_SECRET')
 FIREBASE_SERVICE_ACCOUNT_PATH = BASE_DIR / 'serviceAccountKey.json'
 
 AI_ASSISTANT_ENABLED = os.environ.get('AI_ASSISTANT_ENABLED', 'False').lower() == 'true'
+AI_REPORTS_ENABLED = os.environ.get('AI_REPORTS_ENABLED', 'False').lower() == 'true'
 AI_PROVIDER = os.environ.get('AI_PROVIDER', 'ollama').lower()
 OLLAMA_BASE_URL = os.environ.get('OLLAMA_BASE_URL', 'http://127.0.0.1:11434')
 OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'llama3.2:3b')
