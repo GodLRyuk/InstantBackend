@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     DemandSignalListAPIView,
     DemandForecastAPIView,
+    AnalyticsAssistantAPIView,
     InventoryInsightsAPIView,
     OverviewAPIView,
     SalesSummaryAPIView,
@@ -17,4 +18,5 @@ urlpatterns = [
     path('demand-forecast/', DemandForecastAPIView.as_view(), name='demand-forecast'),
     path('inventory-insights/', InventoryInsightsAPIView.as_view(), name='inventory-insights'),
     path('demand-signals/', DemandSignalListAPIView.as_view(), name='demand-signals'),
+    path('assistant/ask/', AnalyticsAssistantAPIView.as_view(), name='analytics-assistant'),
 ]

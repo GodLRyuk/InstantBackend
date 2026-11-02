@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.conf import settings
 from django.db.models import F
 from django.utils import timezone
 from rest_framework import serializers
@@ -15,6 +16,7 @@ from products.models import Product
 from .models import DemandSignal
 from .serializers import (
     AnalyticsDateRangeSerializer,
+    AnalyticsAssistantSerializer,
     DemandSignalSerializer,
     DemandForecastFilterSerializer,
     InventoryPaginationSerializer,
@@ -33,6 +35,13 @@ from .services.demand_forecasting import (
     MODEL_NAME,
     MODEL_VERSION,
     build_demand_forecasts,
+)
+from .services.ai_assistant import (
+    AssistantProviderError,
+    AssistantProviderTimeout,
+    OllamaProvider,
+    build_approved_analytics_data,
+    classify_analytics_intent,
 )
 
 
@@ -141,6 +150,49 @@ class DemandForecastAPIView(APIView):
             ],
         })
         return response
+
+
+class AnalyticsAssistantAPIView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request):
+        if not settings.AI_ASSISTANT_ENABLED:
+            return Response(
+                {'error': 'The analytics assistant is disabled.'},
+                status=503,
+            )
+
+        serializer = AnalyticsAssistantSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        intent = classify_analytics_intent(data['question'])
+        analytics_data = build_approved_analytics_data(
+            intent,
+            data['start_date'],
+            data['end_date'],
+        )
+
+        try:
+            answer = OllamaProvider().generate_explanation(intent, analytics_data)
+        except AssistantProviderTimeout:
+            return Response(
+                {'error': 'The local AI model timed out. Please try again.'},
+                status=504,
+            )
+        except AssistantProviderError:
+            return Response(
+                {'error': 'The local AI model is unavailable or returned an invalid response.'},
+                status=502,
+            )
+
+        return Response({
+            'answer': answer,
+            'intent': intent,
+            'start_date': data['start_date'].isoformat(),
+            'end_date': data['end_date'].isoformat(),
+            'model': settings.OLLAMA_MODEL,
+            'data': analytics_data,
+        })
 
 
 class InventoryInsightsPagination(LimitOffsetPagination):

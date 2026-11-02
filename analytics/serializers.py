@@ -86,6 +86,13 @@ class DemandForecastFilterSerializer(serializers.Serializer):
     )
 
 
+class AnalyticsAssistantSerializer(AnalyticsDateRangeSerializer):
+    question = serializers.CharField(
+        max_length=1000,
+        trim_whitespace=True,
+    )
+
+
 class DemandSignalSerializer(serializers.ModelSerializer):
     class Meta:
         model = DemandSignal
