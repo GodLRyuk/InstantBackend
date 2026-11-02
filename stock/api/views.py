@@ -113,15 +113,9 @@ class DeleteStockAPIView(APIView):
         except StockBatch.DoesNotExist:
             return Response({"error": "Stock batch not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Adjust inventory
-        inventory = batch.product.inventory
-        inventory.total_stock -= batch.quantity
-        if inventory.total_stock < 0:
-            inventory.total_stock = 0  # just in case
-        inventory.save()
-
-        # Delete the batch
+        product_id = batch.product_id
         batch.delete()
+        inventory = Inventory.objects.get(product_id=product_id)
 
         return Response(
             {"message": "Stock batch deleted successfully", "total_stock": inventory.total_stock},
