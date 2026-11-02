@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import Cart, CartItem
 from products.models import Product
+from analytics.services.demand_signals import record_add_to_cart
 
 
 class AddToCartView(APIView):
@@ -30,6 +31,7 @@ class AddToCartView(APIView):
             cart_item.quantity = cart_item.quantity + quantity
 
         cart_item.save()
+        record_add_to_cart(product, quantity)
 
         return Response({"message": "Product added to cart"})
 class ViewCartView(APIView):

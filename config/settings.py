@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     'reviews',
     'wishlist',
     'reports',
+    'analytics.apps.AnalyticsConfig',
     "store_picker",
     "expenses",
     "store_timing",

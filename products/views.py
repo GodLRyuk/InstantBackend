@@ -12,6 +12,7 @@ import random
 from decimal import Decimal
 from django.db.models import Q
 from django.utils import timezone
+from analytics.services.demand_signals import record_search_signal
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.filter(is_active=True)
@@ -30,6 +31,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 Q(subcategory__name__icontains=search) |
                 Q(description__icontains=search)
             ).distinct()
+            record_search_signal(search, queryset.count())
 
         return queryset
 
