@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      AI_ASSISTANT_ENABLED: ${AI_ASSISTANT_ENABLED:-False}
+      AI_ASSISTANT_ENABLED: ${AI_ASSISTANT_ENABLED:-True}
       AI_REPORTS_ENABLED: ${AI_REPORTS_ENABLED:-False}
       AI_PROVIDER: ${AI_PROVIDER:-ollama}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
