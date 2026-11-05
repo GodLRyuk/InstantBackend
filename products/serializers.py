@@ -1,6 +1,5 @@
 from rest_framework import serializers
 from .models import Bundle, Product
-from .barcodes import generate_unique_in_store_ean13
 from stock.models import Inventory
 from decimal import Decimal
 from reviews.serializers import ProductReviewSerializer
@@ -19,7 +18,6 @@ class ProductImageField(serializers.ImageField):
 
 class ProductSerializer(serializers.ModelSerializer):
     image = ProductImageField(required=False, allow_null=True)
-    generate_barcode = serializers.BooleanField(write_only=True, required=False)
     category_id = serializers.IntegerField(source="category.id", read_only=True)
     subcategory_id = serializers.IntegerField(source="subcategory.id", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
@@ -46,23 +44,10 @@ class ProductSerializer(serializers.ModelSerializer):
             "discounted_price",
             "stock",
             "barcode",
-            "generate_barcode",
             "image", "image_url",
             "description",
             "is_active", "created_at","reviews","average_rating","review_count"
         ]
-
-    def create(self, validated_data):
-        generate_barcode = validated_data.pop("generate_barcode", False)
-        if generate_barcode:
-            validated_data["barcode"] = generate_unique_in_store_ean13()
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        generate_barcode = validated_data.pop("generate_barcode", False)
-        if generate_barcode:
-            validated_data["barcode"] = generate_unique_in_store_ean13()
-        return super().update(instance, validated_data)
 
     def get_discounted_price(self, obj):
         return float(obj.discounted_price())

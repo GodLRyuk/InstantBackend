@@ -2,6 +2,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.contrib.auth import get_user_model
+from rest_framework.test import APIClient
 
 from masters.models import Category, SubCategory
 from products.barcodes import generate_unique_in_store_ean13
@@ -60,28 +62,6 @@ class ProductSerializerTests(TestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("10 MB or smaller", str(serializer.errors["image"]))
 
-    def test_create_generates_unique_in_store_ean13_when_requested(self):
-        serializer = ProductSerializer(
-            data={
-                "name": "Pear",
-                "category": self.category.id,
-                "subcategory": self.subcategory.id,
-                "price": "2.00",
-                "generate_barcode": True,
-            },
-        )
-        self.assertTrue(serializer.is_valid(), serializer.errors)
-
-        product = serializer.save()
-
-        self.assertRegex(product.barcode, r"^2\d{12}$")
-        checksum_total = sum(
-            int(digit) * (3 if index % 2 else 1)
-            for index, digit in enumerate(product.barcode[:12])
-        ) + int(product.barcode[-1])
-        self.assertEqual(checksum_total % 10, 0)
-        self.assertEqual(Product.objects.filter(barcode=product.barcode).count(), 1)
-
     def test_barcode_generator_skips_codes_already_in_use(self):
         existing_barcode = "2000000000008"
         self.product.barcode = existing_barcode
@@ -95,3 +75,36 @@ class ProductSerializerTests(TestCase):
 
         self.assertNotEqual(barcode, existing_barcode)
         self.assertEqual(barcode, "2000000000015")
+
+
+class GenerateBarcodeAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.url = "/api/products/generate-barcode/"
+        self.admin = get_user_model().objects.create_user(
+            username="admin",
+            phone="1000000000",
+            role="ADMIN",
+            is_staff=True,
+        )
+
+    def test_admin_can_generate_barcode_without_creating_product(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        barcode = response.data["barcode"]
+        self.assertRegex(barcode, r"^2\d{12}$")
+        self.assertEqual(Product.objects.count(), 0)
+
+    def test_barcode_generation_requires_admin(self):
+        self.assertEqual(self.client.post(self.url).status_code, 401)
+
+        customer = get_user_model().objects.create_user(
+            username="customer",
+            phone="1000000001",
+            role="CUSTOMER",
+        )
+        self.client.force_authenticate(customer)
+        self.assertEqual(self.client.post(self.url).status_code, 403)

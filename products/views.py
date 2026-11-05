@@ -1,11 +1,13 @@
-from rest_framework import viewsets
+from rest_framework import status, viewsets
 from .models import Bundle, FlashSale, Product
 from .serializers import BundleSerializer, ProductSerializer
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from accounts.permissions import PublicCatalogPermission
 from .serializers import ProductListSerializer
+from .barcodes import generate_unique_in_store_ean13
 from orders.models import OrderItem
 from cart.models import CartItem
 import random
@@ -13,6 +15,28 @@ from decimal import Decimal
 from django.db.models import Q
 from django.utils import timezone
 from analytics.services.demand_signals import record_search_signal
+
+
+class GenerateBarcodeAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not request.user.is_staff:
+            return Response(
+                {"error": "Only admin can generate barcodes"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            barcode = generate_unique_in_store_ean13()
+        except RuntimeError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({"barcode": barcode}, status=status.HTTP_200_OK)
+
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.filter(is_active=True)

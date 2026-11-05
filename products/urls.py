@@ -1,11 +1,24 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
-from .views import ProductViewSet, new_arrivals, recommended_products,products_by_category, flash_sale_products, bundle_offers
+from .views import (
+    GenerateBarcodeAPIView,
+    ProductViewSet,
+    bundle_offers,
+    flash_sale_products,
+    new_arrivals,
+    products_by_category,
+    recommended_products,
+)
 
 router = DefaultRouter()
 router.register('', ProductViewSet, basename='products')
 
 urlpatterns = [
+    path(
+        'generate-barcode/',
+        GenerateBarcodeAPIView.as_view(),
+        name='generate-barcode',
+    ),
     path('new-arrivals/', new_arrivals),
     path('recommended/', recommended_products), 
     path('category/<int:category_id>/products/', products_by_category),
