@@ -204,8 +204,6 @@ EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD')
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_SECRET = os.environ.get('RAZORPAY_SECRET')
 
-GOOGLE_SERVER_CLIENT_ID = os.environ.get('GOOGLE_SERVER_CLIENT_ID', '')
-
 FIREBASE_SERVICE_ACCOUNT_PATH = BASE_DIR / 'serviceAccountKey.json'
 
 AI_ASSISTANT_ENABLED = os.environ.get('AI_ASSISTANT_ENABLED', 'True').lower() == 'true'
