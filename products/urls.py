@@ -2,6 +2,8 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 from .views import (
     GenerateBarcodeAPIView,
+    BundleAdminDetailAPIView,
+    BundleAdminListAPIView,
     FlashSaleAdminDetailAPIView,
     FlashSaleAdminListAPIView,
     ProductViewSet,
@@ -16,6 +18,16 @@ router = DefaultRouter()
 router.register('', ProductViewSet, basename='products')
 
 urlpatterns = [
+    path(
+        'admin/bundles/',
+        BundleAdminListAPIView.as_view(),
+        name='admin-bundles',
+    ),
+    path(
+        'admin/bundles/<int:pk>/',
+        BundleAdminDetailAPIView.as_view(),
+        name='admin-bundle-detail',
+    ),
     path(
         'admin/flash-sales/',
         FlashSaleAdminListAPIView.as_view(),

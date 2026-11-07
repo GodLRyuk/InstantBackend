@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 
 from masters.models import Category, SubCategory
 from products.barcodes import generate_unique_in_store_ean13
-from products.models import FlashSale, Product
+from products.models import Bundle, FlashSale, Product
 from products.serializers import MAX_PRODUCT_IMAGE_SIZE, ProductSerializer
 
 
@@ -247,3 +247,108 @@ class FlashSaleAdminListAPITests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertTrue(FlashSale.objects.filter(id=self.flash_sale.id).exists())
+
+
+class BundleAdminAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.url = "/api/products/admin/bundles/"
+        self.admin = get_user_model().objects.create_user(
+            username="bundle-admin",
+            phone="1000000006",
+            role="ADMIN",
+            is_staff=True,
+        )
+        category = Category.objects.create(name="Bundle Food")
+        subcategory = SubCategory.objects.create(
+            name="Bundle Fruit",
+            category=category,
+        )
+        self.product = Product.objects.create(
+            name="Bundle Apple",
+            category=category,
+            subcategory=subcategory,
+            price="2.00",
+        )
+        self.bundle = Bundle.objects.create(
+            name="Fruit Bundle",
+            description="A fruit bundle",
+            bundle_price="1.50",
+            is_active=True,
+        )
+        self.bundle.products.add(self.product)
+
+    def test_staff_can_list_bundles(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["id"], self.bundle.id)
+        self.assertEqual(response.data[0]["products"], [self.product.id])
+
+    def test_staff_can_create_bundle(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(
+            self.url,
+            {
+                "name": "New Bundle",
+                "description": "Bundle description",
+                "products": [self.product.id],
+                "bundle_price": "1.25",
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        bundle = Bundle.objects.get(pk=response.data["id"])
+        self.assertEqual(bundle.name, "New Bundle")
+        self.assertEqual(list(bundle.products.values_list("id", flat=True)), [self.product.id])
+        self.assertEqual(bundle.bundle_price, 1.25)
+
+    def test_staff_can_patch_bundle(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.url}{self.bundle.id}/",
+            {"name": "Updated Bundle", "products": []},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.bundle.refresh_from_db()
+        self.assertEqual(self.bundle.name, "Updated Bundle")
+        self.assertFalse(self.bundle.products.exists())
+
+    def test_staff_can_delete_bundle(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(f"{self.url}{self.bundle.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Bundle.objects.filter(pk=self.bundle.id).exists())
+
+    def test_non_staff_cannot_manage_bundles(self):
+        customer = get_user_model().objects.create_user(
+            username="bundle-customer",
+            phone="1000000007",
+            role="CUSTOMER",
+        )
+        self.client.force_authenticate(customer)
+
+        for method in (
+            lambda: self.client.get(self.url),
+            lambda: self.client.post(self.url, {}, format="json"),
+            lambda: self.client.patch(
+                f"{self.url}{self.bundle.id}/",
+                {"name": "Unauthorized"},
+                format="json",
+            ),
+            lambda: self.client.delete(f"{self.url}{self.bundle.id}/"),
+        ):
+            self.assertEqual(method().status_code, 403)
+
+        self.bundle.refresh_from_db()
+        self.assertEqual(self.bundle.name, "Fruit Bundle")

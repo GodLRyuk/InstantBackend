@@ -185,6 +185,22 @@ class BundleSerializer(serializers.ModelSerializer):
         return None
 
 
+class BundleAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Bundle
+        fields = [
+            "id",
+            "name",
+            "description",
+            "image",
+            "products",
+            "bundle_price",
+            "is_active",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+
 class FlashSaleSerializer(serializers.ModelSerializer):
     class Meta:
         model = FlashSale
