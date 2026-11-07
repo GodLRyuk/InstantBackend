@@ -1,5 +1,5 @@
 from rest_framework import status, viewsets
-from rest_framework.generics import DestroyAPIView, ListCreateAPIView
+from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.permissions import IsAdminUser
 from .models import Bundle, FlashSale, Product
 from .serializers import BundleSerializer, FlashSaleSerializer, ProductSerializer
@@ -176,6 +176,6 @@ class FlashSaleAdminListAPIView(ListCreateAPIView):
     queryset = FlashSale.objects.prefetch_related('products').order_by('-created_at')
 
 
-class FlashSaleAdminDetailAPIView(DestroyAPIView):
+class FlashSaleAdminDetailAPIView(RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAdminUser]
     queryset = FlashSale.objects.all()
