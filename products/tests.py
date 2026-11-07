@@ -1,13 +1,15 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from masters.models import Category, SubCategory
 from products.barcodes import generate_unique_in_store_ean13
-from products.models import Product
+from products.models import FlashSale, Product
 from products.serializers import MAX_PRODUCT_IMAGE_SIZE, ProductSerializer
 
 
@@ -108,3 +110,56 @@ class GenerateBarcodeAPITests(TestCase):
         )
         self.client.force_authenticate(customer)
         self.assertEqual(self.client.post(self.url).status_code, 403)
+
+
+class FlashSaleAdminListAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.url = "/api/products/admin/flash-sales/"
+        self.admin = get_user_model().objects.create_user(
+            username="flash-sale-admin",
+            phone="1000000002",
+            role="ADMIN",
+            is_staff=True,
+        )
+        self.category = Category.objects.create(name="Flash Sale Food")
+        self.subcategory = SubCategory.objects.create(
+            name="Flash Sale Fruit",
+            category=self.category,
+        )
+        self.product = Product.objects.create(
+            name="Flash Sale Apple",
+            category=self.category,
+            subcategory=self.subcategory,
+            price="1.00",
+        )
+        self.flash_sale = FlashSale.objects.create(
+            title="Weekend Sale",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timedelta(days=1),
+            is_active=True,
+        )
+        self.flash_sale.products.add(self.product)
+
+    def test_staff_can_list_flash_sales(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], self.flash_sale.id)
+        self.assertEqual(response.data[0]["title"], "Weekend Sale")
+        self.assertEqual(response.data[0]["products"], [self.product.id])
+
+    def test_flash_sale_list_requires_staff(self):
+        customer = get_user_model().objects.create_user(
+            username="flash-sale-customer",
+            phone="1000000003",
+            role="CUSTOMER",
+        )
+        self.client.force_authenticate(customer)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)

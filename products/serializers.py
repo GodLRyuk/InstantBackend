@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Bundle, Product
+from .models import Bundle, FlashSale, Product
 from stock.models import Inventory
 from decimal import Decimal
 from reviews.serializers import ProductReviewSerializer
@@ -183,3 +183,17 @@ class BundleSerializer(serializers.ModelSerializer):
         if obj.image and hasattr(obj.image, 'url'):
             return request.build_absolute_uri(obj.image.url) if request else obj.image.url
         return None
+
+
+class FlashSaleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FlashSale
+        fields = [
+            "id",
+            "title",
+            "products",
+            "start_time",
+            "end_time",
+            "is_active",
+            "created_at",
+        ]
