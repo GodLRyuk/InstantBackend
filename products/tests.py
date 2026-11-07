@@ -203,6 +203,38 @@ class FlashSaleAdminListAPITests(TestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(FlashSale.objects.filter(id=self.flash_sale.id).exists())
 
+    def test_staff_can_patch_flash_sale(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.url}{self.flash_sale.id}/",
+            {"title": "Updated Sale", "products": []},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.flash_sale.refresh_from_db()
+        self.assertEqual(self.flash_sale.title, "Updated Sale")
+        self.assertFalse(self.flash_sale.products.exists())
+
+    def test_flash_sale_update_requires_staff(self):
+        customer = get_user_model().objects.create_user(
+            username="flash-sale-update-customer",
+            phone="1000000005",
+            role="CUSTOMER",
+        )
+        self.client.force_authenticate(customer)
+
+        response = self.client.patch(
+            f"{self.url}{self.flash_sale.id}/",
+            {"title": "Unauthorized"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.flash_sale.refresh_from_db()
+        self.assertEqual(self.flash_sale.title, "Weekend Sale")
+
     def test_flash_sale_delete_requires_staff(self):
         customer = get_user_model().objects.create_user(
             username="flash-sale-delete-customer",
