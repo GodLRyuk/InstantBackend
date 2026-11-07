@@ -152,6 +152,24 @@ class FlashSaleAdminListAPITests(TestCase):
         self.assertEqual(response.data[0]["title"], "Weekend Sale")
         self.assertEqual(response.data[0]["products"], [self.product.id])
 
+    def test_staff_can_create_flash_sale(self):
+        self.client.force_authenticate(self.admin)
+        payload = {
+            "title": "Test",
+            "products": [self.product.id],
+            "start_time": timezone.now().isoformat(),
+            "end_time": (timezone.now() + timedelta(days=3)).isoformat(),
+            "is_active": True,
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        created_sale = FlashSale.objects.get(pk=response.data["id"])
+        self.assertEqual(created_sale.title, "Test")
+        self.assertEqual(list(created_sale.products.values_list("id", flat=True)), [self.product.id])
+        self.assertTrue(created_sale.is_active)
+
     def test_flash_sale_list_requires_staff(self):
         customer = get_user_model().objects.create_user(
             username="flash-sale-customer",
@@ -163,3 +181,37 @@ class FlashSaleAdminListAPITests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 403)
+
+        response = self.client.post(
+            self.url,
+            {
+                "title": "Unauthorized",
+                "products": [self.product.id],
+                "start_time": timezone.now().isoformat(),
+                "end_time": (timezone.now() + timedelta(days=1)).isoformat(),
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_can_delete_flash_sale(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(f"{self.url}{self.flash_sale.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(FlashSale.objects.filter(id=self.flash_sale.id).exists())
+
+    def test_flash_sale_delete_requires_staff(self):
+        customer = get_user_model().objects.create_user(
+            username="flash-sale-delete-customer",
+            phone="1000000004",
+            role="CUSTOMER",
+        )
+        self.client.force_authenticate(customer)
+
+        response = self.client.delete(f"{self.url}{self.flash_sale.id}/")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(FlashSale.objects.filter(id=self.flash_sale.id).exists())

@@ -1,5 +1,5 @@
 from rest_framework import status, viewsets
-from rest_framework.generics import ListAPIView
+from rest_framework.generics import DestroyAPIView, ListCreateAPIView
 from rest_framework.permissions import IsAdminUser
 from .models import Bundle, FlashSale, Product
 from .serializers import BundleSerializer, FlashSaleSerializer, ProductSerializer
@@ -170,7 +170,12 @@ def bundle_offers(request):
     return Response(serializer.data)
 
 
-class FlashSaleAdminListAPIView(ListAPIView):
+class FlashSaleAdminListAPIView(ListCreateAPIView):
     permission_classes = [IsAdminUser]
     serializer_class = FlashSaleSerializer
     queryset = FlashSale.objects.prefetch_related('products').order_by('-created_at')
+
+
+class FlashSaleAdminDetailAPIView(DestroyAPIView):
+    permission_classes = [IsAdminUser]
+    queryset = FlashSale.objects.all()
