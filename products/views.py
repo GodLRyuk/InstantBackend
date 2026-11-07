@@ -1,8 +1,16 @@
 from rest_framework import status, viewsets
-from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.generics import (
+    ListCreateAPIView,
+    RetrieveUpdateDestroyAPIView,
+)
 from rest_framework.permissions import IsAdminUser
 from .models import Bundle, FlashSale, Product
-from .serializers import BundleSerializer, FlashSaleSerializer, ProductSerializer
+from .serializers import (
+    BundleAdminSerializer,
+    BundleSerializer,
+    FlashSaleSerializer,
+    ProductSerializer,
+)
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -179,3 +187,15 @@ class FlashSaleAdminListAPIView(ListCreateAPIView):
 class FlashSaleAdminDetailAPIView(RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAdminUser]
     queryset = FlashSale.objects.all()
+
+
+class BundleAdminListAPIView(ListCreateAPIView):
+    permission_classes = [IsAdminUser]
+    serializer_class = BundleAdminSerializer
+    queryset = Bundle.objects.prefetch_related("products").order_by("-created_at")
+
+
+class BundleAdminDetailAPIView(RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAdminUser]
+    serializer_class = BundleAdminSerializer
+    queryset = Bundle.objects.prefetch_related("products")
