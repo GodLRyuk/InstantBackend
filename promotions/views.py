@@ -1,10 +1,12 @@
 from django.utils import timezone
 from datetime import timedelta
 from rest_framework.response import Response  # ✅ fixed — was importing from requests
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework import status
 from .models import DeliveryPass, Coupon, CouponUsage, DeliverySettings
+from .serializers import CouponSerializer
 
 
 @api_view(['POST'])
@@ -161,3 +163,15 @@ def pass_status(request):
         "coupon_unlock_at":              DeliverySettings.get().coupon_unlock_min,
         "free_delivery_min_order":       DeliverySettings.get().free_delivery_min,
     })
+
+
+class CouponAdminListAPIView(ListCreateAPIView):
+    permission_classes = [IsAdminUser]
+    serializer_class = CouponSerializer
+    queryset = Coupon.objects.order_by("-id")
+
+
+class CouponAdminDetailAPIView(RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAdminUser]
+    serializer_class = CouponSerializer
+    queryset = Coupon.objects.all()
