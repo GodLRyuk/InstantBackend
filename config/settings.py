@@ -9,6 +9,7 @@ import os
 import dj_database_url
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.csp import CSP
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -40,7 +41,7 @@ CSRF_TRUSTED_ORIGINS = env_list('CSRF_TRUSTED_ORIGINS')
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
 
-CORS_ALLOW_ALL_ORIGINS = os.environ.get('CORS_ALLOW_ALL_ORIGINS', 'True') == 'True'
+CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = env_list('CORS_ALLOWED_ORIGINS')
 
 INSTALLED_APPS = [
@@ -90,6 +91,7 @@ STORAGES = {
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # must be above CommonMiddleware
     'django.middleware.security.SecurityMiddleware',
+    'django.middleware.csp.ContentSecurityPolicyMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -98,6 +100,22 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+SECURE_CSP = {
+    'default-src': [CSP.SELF],
+    'base-uri': [CSP.SELF],
+    'connect-src': [CSP.SELF],
+    'font-src': [CSP.SELF],
+    'form-action': [CSP.SELF],
+    'frame-ancestors': [CSP.NONE],
+    'frame-src': [CSP.NONE],
+    'img-src': [CSP.SELF, 'data:'],
+    'media-src': [CSP.SELF],
+    'object-src': [CSP.NONE],
+    'script-src': [CSP.SELF],
+    'style-src': [CSP.SELF],
+    'worker-src': [CSP.SELF],
+}
 
 ROOT_URLCONF = 'config.urls'
 
