@@ -15,6 +15,7 @@ class CouponSerializer(serializers.ModelSerializer):
             "active",
             "expires_at",
             "one_time_per_user",
+            "pass_members_only",
         ]
 
     def validate_code(self, value):

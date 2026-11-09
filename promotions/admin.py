@@ -14,9 +14,10 @@ class CouponAdmin(admin.ModelAdmin):
         'active',
         'expires_at',
         'one_time_per_user',
+        'pass_members_only',
         'total_usage_count',
     ]
-    list_filter   = ['coupon_type', 'active', 'one_time_per_user']
+    list_filter   = ['coupon_type', 'active', 'one_time_per_user', 'pass_members_only']
     search_fields = ['code']
     ordering      = ['-id']
 

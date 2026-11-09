@@ -18,6 +18,7 @@ class Coupon(models.Model):
     active = models.BooleanField(default=True)
     expires_at = models.DateTimeField(null=True, blank=True)
     one_time_per_user = models.BooleanField(default=False)
+    pass_members_only = models.BooleanField(default=False)
 
     def is_valid(self):
         """Check if coupon is active and not expired"""
@@ -28,14 +29,15 @@ class Coupon(models.Model):
         return True
 
     def calculate_discount(self, amount):
-            amount = Decimal(amount)
+        amount = Decimal(str(amount))
+        value = Decimal(str(self.value))
 
-            if self.discount_type == "PERCENT":
-                discount = (amount * self.discount_value) / Decimal("100")
-            else:
-                discount = self.discount_value
+        if self.coupon_type == "PERCENTAGE":
+            discount = (amount * value) / Decimal("100")
+        else:
+            discount = value
 
-            return discount.quantize(Decimal("0.01"))
+        return discount.quantize(Decimal("0.01"))
 
     def __str__(self):
         return self.code

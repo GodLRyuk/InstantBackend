@@ -22,15 +22,7 @@ def validate_coupon(request):
     if not code:
         return Response({"error": "Coupon code is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ── Check 1: Members only ──────────────────────────────
-    delivery_pass = getattr(request.user, 'delivery_pass', None)
-    if not delivery_pass or not delivery_pass.is_valid():
-        return Response(
-            {"error": "Coupons are available for Pass members only."},
-            status=status.HTTP_403_FORBIDDEN
-        )
-
-    # ── Check 2: Min order to unlock coupon ───────────────
+    # ── Check 1: Min order to unlock coupon ───────────────
     from promotions.models import DeliverySettings
     config = DeliverySettings.get()
     if order_total < float(config.coupon_unlock_min):
@@ -40,18 +32,27 @@ def validate_coupon(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # ── Check 3: Coupon exists ────────────────────────────
+    # ── Check 2: Coupon exists ────────────────────────────
     try:
         coupon = Coupon.objects.get(code=code)
     except Coupon.DoesNotExist:
         return Response({"error": "Coupon not found."}, status=status.HTTP_404_NOT_FOUND)
 
-    # ── Check 4: Active and not expired ──────────────────
+    # ── Check 3: Active and not expired ──────────────────
     if not coupon.is_valid():
         return Response(
             {"error": "This coupon has expired or is inactive."},
             status=status.HTTP_400_BAD_REQUEST
         )
+
+    # ── Check 4: Pass-only coupon ─────────────────────────
+    if coupon.pass_members_only:
+        delivery_pass = getattr(request.user, 'delivery_pass', None)
+        if not delivery_pass or not delivery_pass.is_valid():
+            return Response(
+                {"error": "This coupon is available for Pass members only."},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
     # ── Check 5: Coupon's own min order ──────────────────
     if order_total < float(coupon.min_order_amount):
