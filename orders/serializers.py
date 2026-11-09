@@ -193,8 +193,6 @@ class CreateOrderSerializer(serializers.Serializer):
         discount_amount = 0
         applied_coupon = None
         if coupon_code:
-            if not pass_active:
-                raise serializers.ValidationError("Coupons are available for Pass members only.")
             if subtotal < MIN_ORDER_COUPON:
                 shortage = MIN_ORDER_COUPON - subtotal
                 raise serializers.ValidationError(f"Add items worth ₹{shortage:.0f} more to unlock coupons.")
@@ -204,6 +202,8 @@ class CreateOrderSerializer(serializers.Serializer):
                 raise serializers.ValidationError("Invalid coupon code.")
             if not applied_coupon.is_valid():
                 raise serializers.ValidationError("This coupon has expired or is inactive.")
+            if applied_coupon.pass_members_only and not pass_active:
+                raise serializers.ValidationError("This coupon is available for Pass members only.")
             if subtotal < float(applied_coupon.min_order_amount):
                 raise serializers.ValidationError(f"This coupon requires a minimum order of ₹{applied_coupon.min_order_amount}.")
             if applied_coupon.one_time_per_user:
