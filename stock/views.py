@@ -12,7 +12,10 @@ from rest_framework.generics import ListCreateAPIView
 class StockListAPIView(APIView):
 
     def get(self, request):
-        stocks = StockBatch.objects.select_related('product').order_by('-id')  # ✅ Fixed
+        stocks = StockBatch.objects.select_related('product')
+        if request.query_params.get("include_empty", "").lower() != "true":
+            stocks = stocks.filter(quantity__gt=0)
+        stocks = stocks.order_by('-id')
         serializer = StockBatchSerializer(stocks, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 

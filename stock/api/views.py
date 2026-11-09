@@ -91,7 +91,10 @@ class UpdateStockAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 class StockListAPIView(APIView):
     def get(self, request):
-        stocks = StockBatch.objects.all().order_by('-id')  
+        stocks = StockBatch.objects.all()
+        if request.query_params.get("include_empty", "").lower() != "true":
+            stocks = stocks.filter(quantity__gt=0)
+        stocks = stocks.order_by('-id')
         serializer = StockBatchSerializer(stocks, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 class DeleteStockAPIView(APIView):

@@ -37,6 +37,34 @@ class StockBatchDeletionTests(TestCase):
             purchase_price="5.00",
             selling_price="10.00",
         )
+        self.empty_batch = StockBatch.objects.create(
+            product=product,
+            batch_no="batch-empty",
+            quantity=0,
+            purchase_price="5.00",
+            selling_price="10.00",
+        )
+
+    def test_batch_list_hides_empty_batches_by_default(self):
+        client = APIClient()
+        client.force_authenticate(user=self.admin)
+
+        response = client.get("/api/stock/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([batch["id"] for batch in response.data], [self.batch.id])
+
+    def test_batch_list_can_include_empty_batches(self):
+        client = APIClient()
+        client.force_authenticate(user=self.admin)
+
+        response = client.get("/api/stock/?include_empty=true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            [batch["id"] for batch in response.data],
+            [self.batch.id, self.empty_batch.id],
+        )
 
     def test_api_delete_updates_inventory(self):
         client = APIClient()
