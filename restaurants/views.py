@@ -1,6 +1,7 @@
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from decimal import Decimal
 import hmac
 from rest_framework import generics, mixins, status as http, viewsets
 from rest_framework.decorators import action
@@ -196,10 +197,11 @@ class CustomerOrderViewSet(
         if order.payment_method == M.ONLINE:
             from django.conf import settings
 
-            data['razorpay'] = {
-                'key_id': settings.RAZORPAY_KEY_ID,
-                'order_id': order.razorpay_order_id,
-                'amount': int(order.total_amount * 100),  # paise
+            data['cashfree'] = {
+                'environment': settings.CASHFREE_ENV,
+                'order_id': order.cashfree_order_id,
+                'payment_session_id': order.cashfree_payment_session_id,
+                'amount': str(order.total_amount),
                 'currency': 'INR',
             }
         return Response(data, status=http.HTTP_201_CREATED)
@@ -223,18 +225,17 @@ class CustomerOrderViewSet(
             order = get_object_or_404(
                 RestaurantOrder.objects.select_for_update(), pk=pk, customer=request.user
             )
-            if order.payment_method != M.ONLINE or not order.razorpay_order_id:
+            if order.payment_method != M.ONLINE or not order.cashfree_order_id:
                 raise ValidationError({'detail': 'This order is not an online payment order.'})
             if order.payment_status != P.PAID:
-                ok = services.verify_razorpay_signature(
-                    order.razorpay_order_id,
-                    s.validated_data['razorpay_payment_id'],
-                    s.validated_data['razorpay_signature'],
-                )
-                if not ok:
+                try:
+                    payment = services.cashfree.success_payment(order.cashfree_order_id)
+                except Exception as exc:
+                    raise ValidationError({'detail': 'Could not verify payment with Cashfree.'}) from exc
+                if not payment or Decimal(str(payment.get('payment_amount', 0))) != order.total_amount:
                     raise ValidationError({'detail': 'Payment verification failed.'})
                 order.payment_status = P.PAID
-                order.razorpay_payment_id = s.validated_data['razorpay_payment_id']
+                order.cashfree_payment_id = str(payment.get('cf_payment_id', ''))
                 if order.status == S.AWAITING_PAYMENT:
                     order.status = S.PLACED
                     services.notify_restaurant_owner_order_placed(order)

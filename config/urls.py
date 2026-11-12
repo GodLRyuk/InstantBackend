@@ -20,7 +20,9 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from django.conf import settings
 from django.conf.urls.static import static
+from payments.views import CashfreeWebhookView
 urlpatterns = [
+    path('api/payments/cashfree/webhook/', CashfreeWebhookView.as_view(), name='cashfree-webhook'),
     path('admin/', admin.site.urls),
     path('api/masters/', include('masters.urls')),
     path('api/products/', include('products.urls')),

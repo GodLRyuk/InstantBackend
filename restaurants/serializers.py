@@ -128,8 +128,8 @@ class PlaceOrderSerializer(QuoteSerializer):
 
 
 class VerifyPaymentSerializer(serializers.Serializer):
-    razorpay_payment_id = serializers.CharField()
-    razorpay_signature = serializers.CharField()
+    # Payment is confirmed by querying Cashfree from the backend.
+    pass
 
 
 class StatusChangeSerializer(serializers.Serializer):
@@ -159,7 +159,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'items', 'item_total', 'discount', 'delivery_fee', 'packaging_charge', 'gst',
             'total_amount', 'offer_code', 'customer_name', 'customer_phone',
             'delivery_address', 'delivery_lat', 'delivery_lng', 'notes', 'rejection_reason',
-            'razorpay_order_id', 'created_at', 'updated_at', 'delivery_otp',
+            'cashfree_order_id', 'created_at', 'updated_at', 'delivery_otp',
         ]
         read_only_fields = fields
 

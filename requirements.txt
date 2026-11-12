@@ -68,7 +68,6 @@ PyJWT==2.11.0
 pyOpenSSL==26.2.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
-razorpay==2.0.1
 redis==7.4.0
 requests==2.33.1
 service-identity==24.2.0

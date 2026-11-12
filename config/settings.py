@@ -219,8 +219,14 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD')
 
-RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
-RAZORPAY_SECRET = os.environ.get('RAZORPAY_SECRET')
+CASHFREE_ENV = os.environ.get('CASHFREE_ENV', 'sandbox').lower()
+if CASHFREE_ENV not in {'sandbox', 'production'}:
+    raise ValueError('CASHFREE_ENV must be sandbox or production')
+CASHFREE_CLIENT_ID = os.environ.get('CASHFREE_CLIENT_ID', '')
+CASHFREE_CLIENT_SECRET = os.environ.get('CASHFREE_CLIENT_SECRET', '')
+CASHFREE_API_VERSION = os.environ.get('CASHFREE_API_VERSION', '2025-01-01')
+CASHFREE_RETURN_URL = os.environ.get('CASHFREE_RETURN_URL', '')
+CASHFREE_NOTIFY_URL = os.environ.get('CASHFREE_NOTIFY_URL', '')
 
 FIREBASE_SERVICE_ACCOUNT_PATH = BASE_DIR / 'serviceAccountKey.json'
 

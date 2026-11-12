@@ -195,6 +195,9 @@ class RestaurantOrder(models.Model):
     )
     razorpay_order_id = models.CharField(max_length=60, blank=True)
     razorpay_payment_id = models.CharField(max_length=60, blank=True)
+    cashfree_order_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
+    cashfree_payment_session_id = models.TextField(blank=True)
+    cashfree_payment_id = models.CharField(max_length=255, blank=True)
     delivery_otp = models.CharField(max_length=6, default=generate_delivery_otp)
     delivery_otp_verified = models.BooleanField(default=False)
 

@@ -8,6 +8,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.forms.models import model_to_dict
 from rest_framework.exceptions import APIException, ValidationError
+from payments import cashfree
 
 from .models import (
     MenuItem,
@@ -248,39 +249,19 @@ def build_quote(user, restaurant_id, items, address_id=None):
     return {'restaurant': restaurant, 'lines': lines, 'bill': bill, 'address': address}
 
 
-# ---------------------------------------------------------------- razorpay
-def _razorpay_client():
-    import razorpay  # imported here so tests and tools work without it configured
-
-    return razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_SECRET))
-
-
-def create_razorpay_order(order):
-    data = _razorpay_client().order.create(
-        {
-            'amount': int(order.total_amount * 100),
-            'currency': 'INR',
-            'receipt': order.order_number,
-            'payment_capture': 1,
-        }
+# ---------------------------------------------------------------- Cashfree
+def create_cashfree_order(order):
+    user = order.customer
+    return cashfree.create_order(
+        amount=order.total_amount,
+        currency='INR',
+        customer_id=user.pk,
+        customer_phone=user.phone,
+        customer_email=user.email,
+        order_note=f'Restaurant order {order.order_number}',
+        return_url=settings.CASHFREE_RETURN_URL,
+        notify_url=settings.CASHFREE_NOTIFY_URL,
     )
-    return data['id']
-
-
-def verify_razorpay_signature(order_id, payment_id, signature):
-    import razorpay
-
-    try:
-        _razorpay_client().utility.verify_payment_signature(
-            {
-                'razorpay_order_id': order_id,
-                'razorpay_payment_id': payment_id,
-                'razorpay_signature': signature,
-            }
-        )
-        return True
-    except razorpay.errors.SignatureVerificationError:
-        return False
 
 
 class PaymentGatewayError(APIException):
@@ -337,10 +318,12 @@ def create_order(user, quote, payment_method, notes=''):
 
     if online:
         try:
-            order.razorpay_order_id = create_razorpay_order(order)
+            cf_order = create_cashfree_order(order)
+            order.cashfree_order_id = cf_order['order_id']
+            order.cashfree_payment_session_id = cf_order['payment_session_id']
         except Exception as exc:  # noqa: BLE001 - any gateway problem rolls the order back
             raise PaymentGatewayError() from exc
-        order.save(update_fields=['razorpay_order_id'])
+        order.save(update_fields=['cashfree_order_id', 'cashfree_payment_session_id'])
     elif order.status == RestaurantOrder.Status.PLACED:
         notify_restaurant_owner_order_placed(order)
     return order
