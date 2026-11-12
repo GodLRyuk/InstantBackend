@@ -10,8 +10,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import serializers, status
 import hmac
-import hashlib
-from django.conf import settings
+from decimal import Decimal
 from orders.models import Order, DeliveryAssignment, generate_delivery_otp
 from orders.services.driver_assignment import User, assign_driver
 from django.core.mail import send_mail
@@ -169,29 +168,26 @@ class VerifyPaymentView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        payment_id = request.data.get("razorpay_payment_id")
-        order_id = request.data.get("razorpay_order_id")
-        signature = request.data.get("razorpay_signature")
+        provider_order_id = request.data.get("cashfree_order_id") or request.data.get("order_id")
+        if not provider_order_id:
+            return Response({"error": "cashfree_order_id is required"}, status=400)
 
         try:
-            order = Order.objects.get(razorpay_order_id=order_id)
+            order = Order.objects.get(cashfree_order_id=provider_order_id, user=request.user)
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
-
-        generated_signature = hmac.new(
-            key=settings.RAZORPAY_SECRET.encode(),
-            msg=f"{order_id}|{payment_id}".encode(),
-            digestmod=hashlib.sha256
-        ).hexdigest()
-
-        if generated_signature == signature:
-            order.razorpay_payment_id = payment_id
-            order.razorpay_signature = signature
-            order.mark_paid()
-            return Response({"status": "Payment Verified & Order Updated"})
-        else:
-            order.mark_failed()
-            return Response({"status": "Invalid Payment"}, status=400)
+        if order.payment_status == 'PAID':
+            return Response({"status": "PAID"})
+        try:
+            from payments import cashfree
+            payment = cashfree.success_payment(provider_order_id)
+        except Exception:
+            return Response({"error": "Could not verify payment with Cashfree"}, status=502)
+        if not payment or Decimal(str(payment.get('payment_amount', 0))) != order.total_amount:
+            return Response({"status": "PENDING"}, status=202)
+        order.cashfree_payment_id = str(payment.get('cf_payment_id', ''))
+        order.mark_paid()
+        return Response({"status": "PAID"})
 
 
 class AssignDriverView(APIView):

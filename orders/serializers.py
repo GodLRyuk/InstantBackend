@@ -8,13 +8,12 @@ from django.db import transaction
 from products.models import Product
 from promotions.models import Coupon, CouponUsage, DeliveryPass
 from promotions.models import DeliverySettings
-import razorpay
 from addresses.models import Address
 from datetime import date as date_type
 from django.conf import settings as django_settings
 from decimal import Decimal
 
-client = razorpay.Client(auth=(django_settings.RAZORPAY_KEY_ID, django_settings.RAZORPAY_SECRET))
+from payments import cashfree
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -36,8 +35,8 @@ class OrderItemSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     coupon_code = serializers.CharField(source='coupon.code', read_only=True)
-    razorpay_order_id = serializers.CharField(read_only=True)
-    razorpay_payment_id = serializers.CharField(read_only=True)
+    cashfree_order_id = serializers.CharField(read_only=True)
+    cashfree_payment_id = serializers.CharField(read_only=True)
     address = serializers.SerializerMethodField()
     driver_id = serializers.SerializerMethodField()
     delivery_otp = serializers.SerializerMethodField()
@@ -52,7 +51,7 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'total_amount', 'discount_amount', 'delivery_fee', 'coupon_code',
             'payment_status', 'order_status', 'created_at', 'items',
-            'razorpay_order_id', 'razorpay_payment_id', 'address',
+            'cashfree_order_id', 'cashfree_payment_id', 'address',
             'delivery_type', 'scheduled_date', 'scheduled_slot_start',
             'scheduled_slot_end', 'driver_id', 'delivery_otp',
         ]
@@ -117,7 +116,11 @@ class CreateOrderSerializer(serializers.Serializer):
         items_data = validated_data['items']
         coupon_code = validated_data.get('coupon_code', '').strip().upper()
         address_id = validated_data.get('address_id')
-        payment_method = validated_data.get('payment_method')
+        payment_method = validated_data.get('payment_method', '').upper()
+        if payment_method in {'RAZORPAY', 'CASHFREE', 'ONLINE'}:
+            payment_method = 'CASHFREE'
+        elif payment_method != 'COD':
+            raise serializers.ValidationError({'payment_method': 'Use CASHFREE or COD.'})
         current_lat = validated_data.get('current_lat')   # kept — still useful for driver nav/fraud signal
         current_lng = validated_data.get('current_lng')
 
@@ -255,21 +258,34 @@ class CreateOrderSerializer(serializers.Serializer):
                 inventory.reserved_stock = 0
             inventory.save()
 
-        razorpay_order_id = None
-        if payment_method == "RAZORPAY":
-            razorpay_order = client.order.create({
-                "amount": int(total_amount * 100), "currency": "INR", "payment_capture": 1
-            })
-            razorpay_order_id = razorpay_order["id"]
-            order.razorpay_order_id = razorpay_order_id
-            order.save()
+        cashfree_order_id = None
+        payment_session_id = None
+        if payment_method == "CASHFREE":
+            try:
+                cf_order = cashfree.create_order(
+                    amount=total_amount,
+                    currency='INR',
+                    customer_id=user.pk,
+                    customer_phone=user.phone,
+                    customer_email=user.email,
+                    order_note=f'Grocery order {order.pk}',
+                    return_url=django_settings.CASHFREE_RETURN_URL,
+                    notify_url=django_settings.CASHFREE_NOTIFY_URL,
+                )
+            except Exception as exc:
+                raise serializers.ValidationError({'payment': 'Unable to initialize Cashfree checkout.'}) from exc
+            cashfree_order_id = cf_order['order_id']
+            payment_session_id = cf_order['payment_session_id']
+            order.cashfree_order_id = cashfree_order_id
+            order.save(update_fields=['cashfree_order_id'])
         elif payment_method == "COD":
             order.payment_status = "PENDING"
             order.save()
 
         return {
             "order_id": order.id,
-            "razorpay_order_id": razorpay_order_id,
+            "cashfree_order_id": cashfree_order_id,
+            "payment_session_id": payment_session_id,
             "subtotal": str(subtotal),
             "delivery_fee": str(delivery_fee),
             "discount_amount": str(discount_amount),
