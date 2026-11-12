@@ -1,0 +1,7 @@
+# Cashfree Payments (sandbox)
+CASHFREE_ENV=sandbox
+CASHFREE_CLIENT_ID=<sandbox-app-id>
+CASHFREE_CLIENT_SECRET=<sandbox-secret-key>
+CASHFREE_API_VERSION=2025-01-01
+CASHFREE_RETURN_URL=<client-return-url>
+CASHFREE_NOTIFY_URL=<api-base-url>/api/payments/cashfree/webhook/
