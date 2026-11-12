@@ -3,10 +3,13 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import uuid
 
 import requests
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _base_url():
@@ -56,7 +59,15 @@ def create_order(*, amount, currency, customer_id, customer_phone, customer_emai
     response = requests.post(
         f'{_base_url()}/orders', headers=_headers(), json=body, timeout=20
     )
-    response.raise_for_status()
+    if not response.ok:
+        # Cashfree's response is useful for operational diagnosis; never log
+        # request headers or credentials.
+        logger.error(
+            'Cashfree create-order failed: HTTP %s response=%s',
+            response.status_code,
+            response.text[:1000],
+        )
+        response.raise_for_status()
     return response.json()
 
 
