@@ -286,6 +286,14 @@ class AdminRestaurantSerializer(serializers.ModelSerializer):
     cuisines = serializers.PrimaryKeyRelatedField(
         many=True, queryset=Cuisine.objects.all(), required=False
     )
+    # Offer values are optional on create/update. A zero percent disables the offer.
+    offer_percent = serializers.IntegerField(
+        required=False, allow_null=True, min_value=0, max_value=90
+    )
+    offer_max_discount = serializers.IntegerField(required=False, min_value=0)
+    offer_min_order = serializers.DecimalField(
+        required=False, max_digits=8, decimal_places=2, min_value=0
+    )
     owner_name = serializers.SerializerMethodField()
     is_open_now = serializers.BooleanField(read_only=True)
     is_accepting_orders = serializers.BooleanField(required=False, default=True)

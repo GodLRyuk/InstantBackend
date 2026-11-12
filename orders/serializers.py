@@ -12,8 +12,11 @@ from addresses.models import Address
 from datetime import date as date_type
 from django.conf import settings as django_settings
 from decimal import Decimal
+import logging
 
 from payments import cashfree
+
+logger = logging.getLogger(__name__)
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -273,6 +276,9 @@ class CreateOrderSerializer(serializers.Serializer):
                     notify_url=django_settings.CASHFREE_NOTIFY_URL,
                 )
             except Exception as exc:
+                logger.exception(
+                    'Cashfree checkout initialization failed for grocery order %s', order.pk
+                )
                 raise serializers.ValidationError({'payment': 'Unable to initialize Cashfree checkout.'}) from exc
             cashfree_order_id = cf_order['order_id']
             payment_session_id = cf_order['payment_session_id']
