@@ -1,4 +1,4 @@
-from decimal import Decimal
+import logging
 
 from django.db import transaction
 from django.http import HttpResponse
@@ -6,8 +6,14 @@ from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 
 from . import cashfree
-from orders.models import Order
+from orders.models import CashfreeCheckoutIntent, Order
+from orders.payment_fulfillment import (
+    activate_paid_order,
+    finalize_cashfree_checkout,
+)
 from restaurants.models import RestaurantOrder
+
+logger = logging.getLogger(__name__)
 
 
 class CashfreeWebhookView(APIView):
@@ -36,12 +42,30 @@ class CashfreeWebhookView(APIView):
         if not payment:
             return HttpResponse(status=200)
 
+        intent = CashfreeCheckoutIntent.objects.filter(
+            cashfree_order_id=provider_order_id
+        ).first()
+        if intent:
+            if not cashfree.payment_matches(payment, amount=intent.amount):
+                return HttpResponse(status=400)
+            try:
+                order = finalize_cashfree_checkout(intent.pk, payment)
+                if order:
+                    activate_paid_order(order)
+            except Exception:
+                logger.exception(
+                    'Could not finalize paid Cashfree checkout %s',
+                    provider_order_id,
+                )
+                return HttpResponse(status=503)
+            return HttpResponse(status=200)
+
         with transaction.atomic():
             order = Order.objects.select_for_update().filter(
                 cashfree_order_id=provider_order_id
             ).first()
             if order:
-                if Decimal(str(payment.get('payment_amount', 0))) != order.total_amount:
+                if not cashfree.payment_matches(payment, amount=order.total_amount):
                     return HttpResponse(status=400)
                 if order.payment_status != 'PAID':
                     order.cashfree_payment_id = str(payment.get('cf_payment_id', ''))
@@ -52,7 +76,10 @@ class CashfreeWebhookView(APIView):
                 cashfree_order_id=provider_order_id
             ).first()
             if restaurant_order:
-                if Decimal(str(payment.get('payment_amount', 0))) != restaurant_order.total_amount:
+                if not cashfree.payment_matches(
+                    payment,
+                    amount=restaurant_order.total_amount,
+                ):
                     return HttpResponse(status=400)
                 if restaurant_order.payment_status != RestaurantOrder.PaymentStatus.PAID:
                     restaurant_order.cashfree_payment_id = str(payment.get('cf_payment_id', ''))

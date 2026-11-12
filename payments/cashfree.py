@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import uuid
+from decimal import Decimal
 
 import requests
 from django.conf import settings
@@ -110,6 +111,14 @@ def success_payment(provider_order_id):
         if payment.get('payment_status') == 'SUCCESS':
             return payment
     return None
+
+
+def payment_matches(payment, *, amount, currency='INR'):
+    return (
+        payment is not None
+        and payment.get('payment_currency') == currency
+        and Decimal(str(payment.get('payment_amount', 0))) == amount
+    )
 
 
 def parse_webhook(raw_body):

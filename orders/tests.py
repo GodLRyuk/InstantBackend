@@ -1,9 +1,15 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
 from accounts.models import User
 from masters.models import Category, SubCategory, Unit
-from orders.models import DeliveryAssignment, Order, OrderItem
+from orders.models import (
+    CashfreeCheckoutIntent,
+    DeliveryAssignment,
+    Order,
+    OrderItem,
+)
 from orders.serializers import OrderItemSerializer
 from products.models import Product
 
@@ -99,3 +105,34 @@ class DeliveryOtpTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.order.refresh_from_db()
         self.assertFalse(self.order.delivery_otp_verified)
+
+
+class CashfreeCheckoutIntentTests(TestCase):
+    def test_unverified_payment_does_not_create_an_order(self):
+        customer = User.objects.create_user(
+            username="cashfree-customer",
+            email="cashfree-customer@example.com",
+            password="test-password-123",
+            phone="5555555555",
+            role="CUSTOMER",
+        )
+        CashfreeCheckoutIntent.objects.create(
+            user=customer,
+            cashfree_order_id="cf-pending-order",
+            payment_session_id="pending-session",
+            amount="80.10",
+            checkout_data={},
+        )
+        client = APIClient()
+        client.force_authenticate(user=customer)
+
+        with patch("payments.cashfree.success_payment", return_value=None):
+            response = client.post(
+                "/api/verify-payment/",
+                {"cashfree_order_id": "cf-pending-order"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data["payment_status"], "PENDING")
+        self.assertFalse(Order.objects.exists())

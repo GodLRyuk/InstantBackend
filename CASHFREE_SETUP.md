@@ -20,7 +20,12 @@ Key, and production return and webhook URLs. The code selects Cashfree's
 sandbox or production API endpoint from `CASHFREE_ENV`. Configure the matching
 webhook URL in the corresponding Cashfree dashboard environment.
 
+For grocery orders, `/api/orders/create/` now creates a Cashfree checkout intent,
+not an app order. The backend creates the app order only after server-side
+Cashfree verification succeeds, either through the authenticated
+`POST /api/verify-payment/` endpoint or the signed webhook. Failed or abandoned
+checkouts therefore do not create an order or consume stock.
+
 Apply database migrations before deploying. The client return URL is supplied
-by the existing client application; payment confirmation must call the
-authenticated backend verification endpoint or arrive through the signed
-webhook. The webhook endpoint is `POST /api/payments/cashfree/webhook/`.
+by the existing client application. The webhook endpoint is
+`POST /api/payments/cashfree/webhook/`.

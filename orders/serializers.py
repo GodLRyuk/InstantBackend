@@ -3,7 +3,13 @@ from rest_framework import serializers
 
 from orders.location_utils import validate_user_location, calculate_delivery_fee, ALLOWED_PINCODES  # ✅ CHANGED
 from stock.models import StockBatch
-from .models import CashRemittance, CashRemittanceItem, CashRemittanceItem, Order, OrderItem
+from .models import (
+    CashfreeCheckoutIntent,
+    CashRemittance,
+    CashRemittanceItem,
+    Order,
+    OrderItem,
+)
 from django.db import transaction
 from products.models import Product
 from promotions.models import Coupon, CouponUsage, DeliveryPass
@@ -188,7 +194,8 @@ class CreateOrderSerializer(serializers.Serializer):
             if subtotal >= MIN_ORDER_DELIVERY:
                 if delivery_pass.can_use_free_delivery():
                     delivery_fee = Decimal("0.00")
-                    delivery_pass.use_free_delivery()
+                    if payment_method == "COD":
+                        delivery_pass.use_free_delivery()
                 else:
                     raise serializers.ValidationError(
                         "You've used all 20 free deliveries this month. "
@@ -219,6 +226,83 @@ class CreateOrderSerializer(serializers.Serializer):
             discount_amount = applied_coupon.calculate_discount(subtotal)
 
         total_amount = subtotal - discount_amount + delivery_fee
+
+        if payment_method == "CASHFREE":
+            checkout_data = {
+                "items": [
+                    {
+                        "product_id": item["product"].pk,
+                        "quantity": item["quantity"],
+                        "price": str(item["price"]),
+                    }
+                    for item in order_items
+                ],
+                "address_snapshot": address_snapshot,
+                "coupon_id": applied_coupon.pk if applied_coupon else None,
+                "discount_amount": str(discount_amount),
+                "delivery_fee": str(delivery_fee),
+                "total_amount": str(total_amount),
+                "delivery_type": delivery_type,
+                "scheduled_date": (
+                    scheduled_date.isoformat() if scheduled_date else None
+                ),
+                "scheduled_slot_start": (
+                    scheduled_slot_start.isoformat()
+                    if scheduled_slot_start
+                    else None
+                ),
+                "scheduled_slot_end": (
+                    scheduled_slot_end.isoformat() if scheduled_slot_end else None
+                ),
+                "pass_used": bool(pass_active and delivery_fee == 0),
+            }
+            try:
+                cf_order = cashfree.create_order(
+                    amount=total_amount,
+                    currency="INR",
+                    customer_id=user.pk,
+                    customer_phone=user.phone,
+                    customer_email=user.email,
+                    order_note="Grocery checkout",
+                    return_url=django_settings.CASHFREE_RETURN_URL,
+                    notify_url=django_settings.CASHFREE_NOTIFY_URL,
+                )
+            except Exception as exc:
+                logger.exception("Cashfree checkout initialization failed")
+                raise serializers.ValidationError(
+                    {"payment": "Unable to initialize Cashfree checkout."}
+                ) from exc
+
+            CashfreeCheckoutIntent.objects.create(
+                user=user,
+                cashfree_order_id=cf_order["order_id"],
+                payment_session_id=cf_order["payment_session_id"],
+                amount=total_amount,
+                checkout_data=checkout_data,
+            )
+            return {
+                "payment_intent_id": cf_order["order_id"],
+                "cashfree_order_id": cf_order["order_id"],
+                "payment_session_id": cf_order["payment_session_id"],
+                "subtotal": str(subtotal),
+                "delivery_fee": str(delivery_fee),
+                "discount_amount": str(discount_amount),
+                "amount": str(total_amount),
+                "currency": "INR",
+                "payment_method": payment_method,
+                "payment_status": "PENDING",
+                "order_status": "AWAITING_PAYMENT",
+                "pass_used": bool(pass_active and delivery_fee == 0),
+                "coupon_applied": applied_coupon.code if applied_coupon else None,
+                "delivery_type": delivery_type,
+                "scheduled_date": str(scheduled_date) if scheduled_date else None,
+                "scheduled_slot": (
+                    f"{scheduled_slot_start}–{scheduled_slot_end}"
+                    if scheduled_slot_start
+                    else None
+                ),
+                "distance_km": location_check["distance_km"],
+            }
 
         order = Order.objects.create(
             user=user,
@@ -261,37 +345,14 @@ class CreateOrderSerializer(serializers.Serializer):
                 inventory.reserved_stock = 0
             inventory.save()
 
-        cashfree_order_id = None
-        payment_session_id = None
-        if payment_method == "CASHFREE":
-            try:
-                cf_order = cashfree.create_order(
-                    amount=total_amount,
-                    currency='INR',
-                    customer_id=user.pk,
-                    customer_phone=user.phone,
-                    customer_email=user.email,
-                    order_note=f'Grocery order {order.pk}',
-                    return_url=django_settings.CASHFREE_RETURN_URL,
-                    notify_url=django_settings.CASHFREE_NOTIFY_URL,
-                )
-            except Exception as exc:
-                logger.exception(
-                    'Cashfree checkout initialization failed for grocery order %s', order.pk
-                )
-                raise serializers.ValidationError({'payment': 'Unable to initialize Cashfree checkout.'}) from exc
-            cashfree_order_id = cf_order['order_id']
-            payment_session_id = cf_order['payment_session_id']
-            order.cashfree_order_id = cashfree_order_id
-            order.save(update_fields=['cashfree_order_id'])
-        elif payment_method == "COD":
+        if payment_method == "COD":
             order.payment_status = "PENDING"
             order.save()
 
         return {
             "order_id": order.id,
-            "cashfree_order_id": cashfree_order_id,
-            "payment_session_id": payment_session_id,
+            "cashfree_order_id": None,
+            "payment_session_id": None,
             "subtotal": str(subtotal),
             "delivery_fee": str(delivery_fee),
             "discount_amount": str(discount_amount),

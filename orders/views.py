@@ -4,13 +4,12 @@ from django.db.models.aggregates import Count, Sum
 from django.db.models.aggregates import Count
 from rest_framework.generics import ListAPIView, RetrieveAPIView, CreateAPIView
 from rest_framework.permissions import IsAuthenticated
-from .models import CashRemittance, CashRemittanceItem, Order
+from .models import CashfreeCheckoutIntent, CashRemittance, CashRemittanceItem, Order
 from .serializers import CashRemittanceSerializer, OrderSerializer, CreateOrderSerializer, ValidateOrderSerializer
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import serializers, status
 import hmac
-from decimal import Decimal
 from orders.models import Order, DeliveryAssignment, generate_delivery_otp
 from orders.services.driver_assignment import User, assign_driver
 from django.core.mail import send_mail
@@ -19,6 +18,10 @@ from promotions.models import Coupon, CouponUsage
 from datetime import date, timedelta, timezone              # 👈 add
 from orders.slot_utils import generate_slots      # 👈 add
 from rest_framework.decorators import api_view, permission_classes  # 👈 add
+from orders.payment_fulfillment import (
+    activate_paid_order,
+    finalize_cashfree_checkout,
+)
 
 
 class OrderListView(ListAPIView):
@@ -117,6 +120,9 @@ class CreateOrderView(CreateAPIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.save()
 
+        if data.get("payment_intent_id"):
+            return Response(data, status=201)
+
         try:
             order_id = data.get('order_id') or data.get('id')
             order = Order.objects.get(id=order_id)
@@ -172,22 +178,61 @@ class VerifyPaymentView(APIView):
         if not provider_order_id:
             return Response({"error": "cashfree_order_id is required"}, status=400)
 
+        intent = CashfreeCheckoutIntent.objects.filter(
+            cashfree_order_id=provider_order_id,
+            user=request.user,
+        ).first()
+        if intent:
+            if intent.order_id:
+                return Response({
+                    "status": "PAID",
+                    "payment_status": "PAID",
+                    "order_id": intent.order_id,
+                })
+            try:
+                from payments import cashfree
+                payment = cashfree.success_payment(provider_order_id)
+            except Exception:
+                return Response(
+                    {"error": "Could not verify payment with Cashfree"},
+                    status=502,
+                )
+            if (
+                not cashfree.payment_matches(payment, amount=intent.amount)
+            ):
+                return Response({"status": "PENDING", "payment_status": "PENDING"}, status=202)
+            try:
+                order = finalize_cashfree_checkout(intent.pk, payment)
+            except ValueError as exc:
+                return Response({"error": str(exc)}, status=409)
+            if order is None:
+                return Response(
+                    {"status": "PENDING", "payment_status": "PENDING"},
+                    status=202,
+                )
+            activate_paid_order(order)
+            return Response({
+                "status": "PAID",
+                "payment_status": "PAID",
+                "order_id": order.id,
+            })
+
         try:
             order = Order.objects.get(cashfree_order_id=provider_order_id, user=request.user)
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
         if order.payment_status == 'PAID':
-            return Response({"status": "PAID"})
+            return Response({"status": "PAID", "payment_status": "PAID"})
         try:
             from payments import cashfree
             payment = cashfree.success_payment(provider_order_id)
         except Exception:
             return Response({"error": "Could not verify payment with Cashfree"}, status=502)
-        if not payment or Decimal(str(payment.get('payment_amount', 0))) != order.total_amount:
-            return Response({"status": "PENDING"}, status=202)
+        if not cashfree.payment_matches(payment, amount=order.total_amount):
+            return Response({"status": "PENDING", "payment_status": "PENDING"}, status=202)
         order.cashfree_payment_id = str(payment.get('cf_payment_id', ''))
         order.mark_paid()
-        return Response({"status": "PAID"})
+        return Response({"status": "PAID", "payment_status": "PAID"})
 
 
 class AssignDriverView(APIView):
