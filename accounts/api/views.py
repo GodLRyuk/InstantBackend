@@ -5,6 +5,7 @@ from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db.models.deletion import ProtectedError
+from django.db import transaction
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
@@ -16,6 +17,7 @@ from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
 from django.core.mail import send_mail
 from orders.models import Order, DeliveryAssignment
+from restaurants.models import RestaurantOrder
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from accounts.login_security import (
@@ -319,6 +321,31 @@ class UserDeleteAPIView(APIView):
 
         return Response(
             {"message": "User deleted successfully", "user_id": user_id},
+            status=status.HTTP_200_OK,
+        )
+
+
+class AccountDeletionAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        user = request.user
+        user_id = user.pk
+
+        try:
+            with transaction.atomic():
+                # Restaurant orders protect customer accounts from deletion; remove
+                # this user's own orders as part of their account data cleanup.
+                RestaurantOrder.objects.filter(customer=user).delete()
+                user.delete()
+        except ProtectedError:
+            return Response(
+                {"error": "This account has records that prevent deletion. Contact support."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        return Response(
+            {"message": "Account and associated data deleted successfully", "user_id": user_id},
             status=status.HTTP_200_OK,
         )
 
