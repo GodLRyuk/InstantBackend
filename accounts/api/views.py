@@ -4,6 +4,7 @@ from rest_framework import status
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.db.models.deletion import ProtectedError
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
@@ -281,6 +282,35 @@ class UserListAPIView(APIView):
             for user in queryset
         ]
         return Response({"count": len(users), "results": users}, status=status.HTTP_200_OK)
+
+
+class UserDeleteAPIView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def delete(self, request, user_id):
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if user.pk == request.user.pk:
+            return Response(
+                {"error": "You cannot delete your own account through this endpoint"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user.delete()
+        except ProtectedError:
+            return Response(
+                {"error": "This user cannot be deleted because related records depend on it"},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        return Response(
+            {"message": "User deleted successfully", "user_id": user_id},
+            status=status.HTTP_200_OK,
+        )
 
 
 class VerifyOTPAPIView(APIView):
