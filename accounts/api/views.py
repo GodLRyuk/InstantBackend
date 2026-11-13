@@ -5,7 +5,7 @@ from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db.models.deletion import ProtectedError
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from .utils.email_utils import send_otp_email
@@ -284,8 +284,18 @@ class UserListAPIView(APIView):
         return Response({"count": len(users), "results": users}, status=status.HTTP_200_OK)
 
 
+class IsAdminOrSuperuser(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user
+            and user.is_authenticated
+            and (user.is_superuser or user.role == "ADMIN")
+        )
+
+
 class UserDeleteAPIView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOrSuperuser]
 
     def delete(self, request, user_id):
         try:
