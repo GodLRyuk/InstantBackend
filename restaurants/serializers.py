@@ -121,6 +121,11 @@ class QuoteSerializer(serializers.Serializer):
     address_id = serializers.IntegerField(required=False)
 
 
+class DeliveryChargeSerializer(serializers.Serializer):
+    restaurant_id = serializers.IntegerField()
+    address_id = serializers.IntegerField()
+
+
 class PlaceOrderSerializer(QuoteSerializer):
     address_id = serializers.IntegerField()
     payment_method = serializers.ChoiceField(choices=RestaurantOrder.PaymentMethod.choices)

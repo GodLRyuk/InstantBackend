@@ -155,6 +155,14 @@ class Bill:
         return self.item_total - self.discount + self.delivery_fee + self.packaging + self.gst
 
 
+def calculate_delivery_charge(restaurant, distance_km=None):
+    """Return the configured fee plus ₹8 for every kilometre over 1 km."""
+    delivery_fee = Decimal(restaurant.delivery_fee)
+    if distance_km is not None and distance_km > 1:
+        delivery_fee += Decimal(str(distance_km)) * Decimal('8')
+    return delivery_fee.quantize(Decimal('0.01'))
+
+
 def calculate_bill(restaurant, lines, distance_km=None):
     """Price a restaurant cart, including the distance-based delivery surcharge."""
     lines = list(lines)
@@ -170,11 +178,13 @@ def calculate_bill(restaurant, lines, distance_km=None):
             discount = cap
 
     gst = whole_rupees((item_total - discount) * GST_RATE)
-    delivery_fee = Decimal(restaurant.delivery_fee)
-    if distance_km is not None and distance_km > 1:
-        delivery_fee += Decimal(str(distance_km)) * Decimal('8')
-
-    return Bill(item_total, discount, delivery_fee.quantize(Decimal('0.01')), packaging, gst)
+    return Bill(
+        item_total,
+        discount,
+        calculate_delivery_charge(restaurant, distance_km),
+        packaging,
+        gst,
+    )
 
 
 # ---------------------------------------------------------------- address

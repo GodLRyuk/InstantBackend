@@ -18,6 +18,7 @@ router.register(r'', views.RestaurantViewSet, basename='restaurant')  # keep las
 
 urlpatterns = [
     path('cuisines/', views.CuisineListView.as_view(), name='restaurant-cuisines'),
+    path('delivery-charge/', views.DeliveryChargeView.as_view(), name='restaurant-delivery-charge'),
     path('partner/onboard/', views.PartnerOnboardView.as_view(), name='partner-onboard'),
     path('driver/orders/', views.RestaurantDriverOrdersView.as_view(), name='restaurant-driver-orders'),
     path(

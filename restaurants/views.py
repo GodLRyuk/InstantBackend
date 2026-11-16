@@ -25,6 +25,7 @@ from .serializers import (
     AdminRestaurantSerializer,
     AdminMenuCategorySerializer,
     CuisineSerializer,
+    DeliveryChargeSerializer,
     MenuCategorySerializer,
     MenuItemSerializer,
     OrderSerializer,
@@ -62,6 +63,55 @@ class CuisineListView(generics.ListAPIView):
     queryset = Cuisine.objects.all()
     serializer_class = CuisineSerializer
     pagination_class = None
+
+
+class DeliveryChargeView(APIView):
+    """Calculate delivery fee and availability before a customer places an order."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = DeliveryChargeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            restaurant = Restaurant.objects.get(
+                pk=data['restaurant_id'],
+                status=Restaurant.Status.APPROVED,
+            )
+        except Restaurant.DoesNotExist:
+            raise ValidationError({'restaurant_id': 'Restaurant not found.'})
+
+        address = services.resolve_address(request.user, data['address_id'])
+        coordinates = (address['lat'], address['lng'], restaurant.latitude, restaurant.longitude)
+        if any(value is None for value in coordinates):
+            raise ValidationError({
+                'address_id': 'Delivery distance cannot be calculated because location coordinates are missing.'
+            })
+
+        distance_km = services.haversine_km(
+            address['lat'], address['lng'], restaurant.latitude, restaurant.longitude
+        )
+        radius_km = float(restaurant.delivery_radius_km)
+        if distance_km > radius_km:
+            return Response(
+                {
+                    'serving_area': False,
+                    'message': 'Sorry, we are not serving this area yet.',
+                    'distance_km': round(distance_km, 2),
+                    'service_radius_km': radius_km,
+                },
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            'serving_area': True,
+            'message': 'Delivery is available at this address.',
+            'distance_km': round(distance_km, 2),
+            'service_radius_km': radius_km,
+            'delivery_fee': _money(services.calculate_delivery_charge(restaurant, distance_km)),
+        })
 
 
 class RestaurantViewSet(mixins.UpdateModelMixin, viewsets.ReadOnlyModelViewSet):
