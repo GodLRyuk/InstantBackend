@@ -10,7 +10,12 @@ from rest_framework.test import APIClient
 from masters.models import Category, SubCategory
 from products.barcodes import generate_unique_in_store_ean13
 from products.models import Bundle, FlashSale, Product
-from products.serializers import MAX_PRODUCT_IMAGE_SIZE, ProductSerializer
+from products.serializers import (
+    MAX_PRODUCT_IMAGE_SIZE,
+    ProductListSerializer,
+    ProductSerializer,
+)
+from stock.models import StockBatch
 
 
 class ProductSerializerTests(TestCase):
@@ -36,6 +41,68 @@ class ProductSerializerTests(TestCase):
 
         self.assertEqual(data["category_id"], self.category.id)
         self.assertEqual(data["subcategory_id"], self.subcategory.id)
+
+    def test_product_responses_include_current_batch_prices(self):
+        StockBatch.objects.create(
+            product=self.product,
+            batch_no="CATALOG-BATCH-1",
+            quantity=5,
+            purchase_price="4.25",
+            selling_price="8.50",
+        )
+
+        for serializer_class in (ProductSerializer, ProductListSerializer):
+            with self.subTest(serializer=serializer_class.__name__):
+                data = serializer_class(self.product).data
+                self.assertEqual(data["selling_price"], "8.50")
+                self.assertIsNone(data["purchase_price"])
+                self.assertEqual(data["current_batch_no"], "CATALOG-BATCH-1")
+
+    def test_product_without_stock_batch_has_no_purchase_price(self):
+        data = ProductListSerializer(self.product).data
+
+        self.assertEqual(data["selling_price"], "1.00")
+        self.assertIsNone(data["purchase_price"])
+        self.assertIsNone(data["current_batch_no"])
+
+    def test_product_api_returns_current_batch_prices(self):
+        StockBatch.objects.create(
+            product=self.product,
+            batch_no="CATALOG-BATCH-API",
+            quantity=5,
+            purchase_price="4.25",
+            selling_price="8.50",
+        )
+        client = APIClient()
+
+        list_response = client.get("/api/products/")
+        detail_response = client.get(f"/api/products/{self.product.id}/")
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(detail_response.status_code, 200)
+        listed_product = next(
+            item for item in list_response.data if item["id"] == self.product.id
+        )
+        self.assertIsNone(listed_product["purchase_price"])
+        self.assertIsNone(detail_response.data["purchase_price"])
+
+        admin = get_user_model().objects.create_user(
+            username="catalog-price-admin",
+            phone="1000000008",
+            role="ADMIN",
+            is_staff=True,
+        )
+        client.force_authenticate(admin)
+        staff_list_response = client.get("/api/products/")
+        staff_detail_response = client.get(f"/api/products/{self.product.id}/")
+        staff_product = next(
+            item for item in staff_list_response.data if item["id"] == self.product.id
+        )
+
+        for data in (staff_product, staff_detail_response.data):
+            self.assertEqual(data["selling_price"], "8.50")
+            self.assertEqual(data["purchase_price"], "4.25")
+            self.assertEqual(data["current_batch_no"], "CATALOG-BATCH-API")
 
     def test_product_subcategory_can_be_updated(self):
         serializer = ProductSerializer(

@@ -8,6 +8,12 @@ from reviews.serializers import ProductReviewSerializer
 MAX_PRODUCT_IMAGE_SIZE = 10 * 1024 * 1024
 
 
+def _current_stock_batch(product):
+    if not hasattr(product, "_catalog_current_batch"):
+        product._catalog_current_batch = product.current_batch()
+    return product._catalog_current_batch
+
+
 class ProductImageField(serializers.ImageField):
     def to_internal_value(self, data):
         size = getattr(data, "size", None)
@@ -26,6 +32,9 @@ class ProductSerializer(serializers.ModelSerializer):
     unit_name = serializers.CharField(source="unit.name", read_only=True)
 
     discounted_price = serializers.SerializerMethodField()
+    selling_price = serializers.SerializerMethodField()
+    purchase_price = serializers.SerializerMethodField()
+    current_batch_no = serializers.SerializerMethodField()
     stock = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
     reviews = ProductReviewSerializer(many=True, read_only=True)
@@ -41,6 +50,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "brand", "brand_name",
             "unit", "unit_name", "unit_size",
             "price", "discount_percent",
+            "selling_price", "purchase_price", "current_batch_no",
             "discounted_price",
             "stock",
             "barcode",
@@ -51,6 +61,21 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_discounted_price(self, obj):
         return float(obj.discounted_price())
+
+    def get_selling_price(self, obj):
+        batch = _current_stock_batch(obj)
+        return str(batch.selling_price if batch else obj.price)
+
+    def get_purchase_price(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_staff:
+            return None
+        batch = _current_stock_batch(obj)
+        return str(batch.purchase_price) if batch else None
+
+    def get_current_batch_no(self, obj):
+        batch = _current_stock_batch(obj)
+        return batch.batch_no if batch else None
 
     def get_stock(self, obj):
         try:
@@ -91,6 +116,9 @@ class ProductListSerializer(serializers.ModelSerializer):
     brand_name = serializers.CharField(source="brand.name", read_only=True)
     unit_name = serializers.CharField(source="unit.name", read_only=True)
     discounted_price = serializers.SerializerMethodField()
+    selling_price = serializers.SerializerMethodField()
+    purchase_price = serializers.SerializerMethodField()
+    current_batch_no = serializers.SerializerMethodField()
     stock = serializers.SerializerMethodField()
     image = serializers.SerializerMethodField()
 
@@ -112,6 +140,9 @@ class ProductListSerializer(serializers.ModelSerializer):
             "unit_name",
             "price",
             "discount_percent",
+            "selling_price",
+            "purchase_price",
+            "current_batch_no",
             "discounted_price",
             "stock",
             "barcode",
@@ -123,6 +154,21 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     def get_discounted_price(self, obj):
         return float(obj.discounted_price())
+
+    def get_selling_price(self, obj):
+        batch = _current_stock_batch(obj)
+        return str(batch.selling_price if batch else obj.price)
+
+    def get_purchase_price(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_staff:
+            return None
+        batch = _current_stock_batch(obj)
+        return str(batch.purchase_price) if batch else None
+
+    def get_current_batch_no(self, obj):
+        batch = _current_stock_batch(obj)
+        return batch.batch_no if batch else None
 
     def get_stock(self, obj):
         try:
