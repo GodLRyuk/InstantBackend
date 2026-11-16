@@ -10,6 +10,7 @@ from django.shortcuts import get_object_or_404
 from ..serializers import InventorySerializer, StockBatchSerializer
 from django.db import transaction
 from django.db.models import Sum
+from decimal import Decimal, InvalidOperation
 
 class AddStockAPIView(APIView):
 
@@ -33,6 +34,25 @@ class AddStockAPIView(APIView):
         batch_no = request.data.get("batch_no")
         purchase_price = request.data.get("purchase_price")
         selling_price = request.data.get("selling_price")
+
+        try:
+            selling_price_value = Decimal(str(selling_price))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response(
+                {"error": "Enter a valid selling price."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if selling_price_value > product.price:
+            return Response(
+                {
+                    "error": (
+                        "Selling price cannot be greater than the product price "
+                        "(MRP). Please correct the price before adding stock."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Create batch
         batch = StockBatch.objects.create(
