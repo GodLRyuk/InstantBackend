@@ -51,9 +51,6 @@ class AddStockAPIView(APIView):
         inventory.total_stock += quantity
         inventory.save()
 
-        product.price = selling_price
-        product.save(update_fields=["price"])
-
         return Response({
             "message": "Stock added successfully",
             "batch_id": batch.id,

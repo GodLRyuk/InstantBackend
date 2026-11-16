@@ -40,7 +40,6 @@ class ProductCreateAPIView(APIView):
             unit=unit,
             unit_size=request.data.get("unit_size"),
             price=request.data.get("price"),
-            mrp=request.data.get("mrp"),
             purchase_price=request.data.get("purchase_price"),
             discount_percent=request.data.get("discount_percent", 0),
             description=request.data.get("description"),
@@ -82,7 +81,6 @@ class ProductListAPIView(APIView):
             "unit_name": product.unit.name if product.unit else None,
             "unit_size": product.unit_size,
             "price": str(product.price),
-            "mrp": str(product.mrp if product.mrp is not None else product.current_selling_price()),
             "discount_percent": str(product.effective_discount_percent()),
             "final_price": str(product.discounted_price()),
             "description": product.description,   # ✅ comma added
@@ -108,7 +106,6 @@ class ProductUpdateAPIView(APIView):
 
         product.name = request.data.get("name", product.name)
         product.price = request.data.get("price", product.price)
-        product.mrp = request.data.get("mrp", product.mrp)
         product.purchase_price = request.data.get("purchase_price", product.purchase_price)
         product.discount_percent = request.data.get("discount_percent", product.discount_percent)
         product.description = request.data.get("description", product.description)
@@ -164,9 +161,8 @@ class ProductSearchAPIView(APIView):
             "brand": p.brand.name if p.brand else None,
             "unit_name": p.unit.name if p.unit else None,
             "price": str(p.price),
-            "mrp": str(p.mrp if p.mrp is not None else p.current_selling_price()),
             "discount_percent": str(p.effective_discount_percent()),
-            "discount_amount": str(p.current_mrp() - p.discounted_price()),
+            "discount_amount": str(p.discount_base_price() - p.discounted_price()),
             "final_price": str(p.discounted_price()),
             "image": p.image.url if p.image else None,
             "description": p.description,

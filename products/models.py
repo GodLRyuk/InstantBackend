@@ -15,7 +15,6 @@ class Product(models.Model):
     barcode = models.CharField(max_length=100, blank=True, null=True, unique=True)
 
     price = models.DecimalField(max_digits=10, decimal_places=2)
-    mrp = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     # Product-level cost is useful before the first stock batch exists. Batch
     # purchase prices remain authoritative whenever an in-stock batch exists.
     purchase_price = models.DecimalField(
@@ -38,25 +37,27 @@ class Product(models.Model):
             return batch.selling_price
         return self.price
 
-    def current_mrp(self):
-        return self.mrp if self.mrp is not None else self.current_selling_price()
+    def discount_base_price(self):
+        # Product.price is the base for discounts; batch selling_price is the
+        # actual sale price and may be lower.
+        return self.price
 
     def effective_discount_percent(self):
         if self.discount_percent and self.discount_percent > 0:
             return self.discount_percent
 
-        mrp = self.current_mrp()
+        base_price = self.discount_base_price()
         selling_price = self.current_selling_price()
-        if mrp > 0 and selling_price < mrp:
-            return (((mrp - selling_price) / mrp) * Decimal("100")).quantize(
+        if base_price > 0 and selling_price < base_price:
+            return (((base_price - selling_price) / base_price) * Decimal("100")).quantize(
                 Decimal("0.01")
             )
         return Decimal("0")
 
     def discounted_price(self):
-        mrp = self.current_mrp()
-        discount_amount = (mrp * self.effective_discount_percent()) / Decimal("100")
-        return round(mrp - discount_amount, 2)
+        base_price = self.discount_base_price()
+        discount_amount = (base_price * self.effective_discount_percent()) / Decimal("100")
+        return round(base_price - discount_amount, 2)
 
     def __str__(self):
         return self.name
