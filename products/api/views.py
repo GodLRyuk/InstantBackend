@@ -83,7 +83,7 @@ class ProductListAPIView(APIView):
             "unit_size": product.unit_size,
             "price": str(product.price),
             "mrp": str(product.mrp if product.mrp is not None else product.current_selling_price()),
-            "discount_percent": str(product.discount_percent),
+            "discount_percent": str(product.effective_discount_percent()),
             "final_price": str(product.discounted_price()),
             "description": product.description,   # ✅ comma added
             "stock": product.stock,               # ✅ comma added
@@ -164,6 +164,9 @@ class ProductSearchAPIView(APIView):
             "brand": p.brand.name if p.brand else None,
             "unit_name": p.unit.name if p.unit else None,
             "price": str(p.price),
+            "mrp": str(p.mrp if p.mrp is not None else p.current_selling_price()),
+            "discount_percent": str(p.effective_discount_percent()),
+            "discount_amount": str(p.current_mrp() - p.discounted_price()),
             "final_price": str(p.discounted_price()),
             "image": p.image.url if p.image else None,
             "description": p.description,

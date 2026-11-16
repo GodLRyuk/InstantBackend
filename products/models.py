@@ -36,13 +36,27 @@ class Product(models.Model):
         batch = self.current_batch()
         if batch:
             return batch.selling_price
-        return self.price  
-    def discounted_price(self):
-        price = self.current_selling_price()
+        return self.price
+
+    def current_mrp(self):
+        return self.mrp if self.mrp is not None else self.current_selling_price()
+
+    def effective_discount_percent(self):
         if self.discount_percent and self.discount_percent > 0:
-            discount_amount = (price * self.discount_percent) / Decimal("100")
-            return round(price - discount_amount, 2)
-        return price
+            return self.discount_percent
+
+        mrp = self.current_mrp()
+        selling_price = self.current_selling_price()
+        if mrp > 0 and selling_price < mrp:
+            return (((mrp - selling_price) / mrp) * Decimal("100")).quantize(
+                Decimal("0.01")
+            )
+        return Decimal("0")
+
+    def discounted_price(self):
+        mrp = self.current_mrp()
+        discount_amount = (mrp * self.effective_discount_percent()) / Decimal("100")
+        return round(mrp - discount_amount, 2)
 
     def __str__(self):
         return self.name

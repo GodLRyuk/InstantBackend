@@ -69,7 +69,7 @@ class ProductSerializer(serializers.ModelSerializer):
         return float(obj.discounted_price())
 
     def get_discount_amount(self, obj):
-        return float(obj.current_selling_price() - obj.discounted_price())
+        return float(obj.current_mrp() - obj.discounted_price())
 
     def get_selling_price(self, obj):
         batch = _current_stock_batch(obj)
@@ -81,6 +81,7 @@ class ProductSerializer(serializers.ModelSerializer):
         batch = _current_stock_batch(instance)
         if data["mrp"] is None:
             data["mrp"] = str(instance.current_selling_price())
+        data["discount_percent"] = str(instance.effective_discount_percent())
         if not request or not request.user.is_staff:
             data["purchase_price"] = None
         elif batch:
@@ -178,7 +179,7 @@ class ProductListSerializer(serializers.ModelSerializer):
         return float(obj.discounted_price())
 
     def get_discount_amount(self, obj):
-        return float(obj.current_selling_price() - obj.discounted_price())
+        return float(obj.current_mrp() - obj.discounted_price())
 
     def get_selling_price(self, obj):
         batch = _current_stock_batch(obj)
@@ -190,6 +191,7 @@ class ProductListSerializer(serializers.ModelSerializer):
         batch = _current_stock_batch(instance)
         if data["mrp"] is None:
             data["mrp"] = str(instance.current_selling_price())
+        data["discount_percent"] = str(instance.effective_discount_percent())
         if not request or not request.user.is_staff:
             data["purchase_price"] = None
         elif batch:
