@@ -2,14 +2,16 @@ from rest_framework import status, viewsets
 from rest_framework.generics import (
     ListCreateAPIView,
     RetrieveUpdateDestroyAPIView,
+    ListAPIView,
 )
 from rest_framework.permissions import IsAdminUser
-from .models import Bundle, FlashSale, Product
+from .models import Bundle, FlashSale, GeneratedBarcode, Product
 from .serializers import (
     BundleAdminSerializer,
     BundleSerializer,
     FlashSaleSerializer,
     ProductSerializer,
+    GeneratedBarcodeSerializer,
 )
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -24,6 +26,7 @@ import random
 from decimal import Decimal
 from django.db.models import Q
 from django.utils import timezone
+from django.db import transaction
 from analytics.services.demand_signals import record_search_signal
 
 
@@ -37,15 +40,44 @@ class GenerateBarcodeAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        try:
-            barcode = generate_unique_in_store_ean13()
-        except RuntimeError as error:
-            return Response(
-                {"error": str(error)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        product_id = request.data.get('product_id')
+        with transaction.atomic():
+            product = None
+            if product_id is not None:
+                try:
+                    product = Product.objects.select_for_update().get(pk=product_id)
+                except (Product.DoesNotExist, ValueError, TypeError):
+                    return Response({'product_id': 'Product not found.'}, status=status.HTTP_400_BAD_REQUEST)
+                if product.barcode:
+                    return Response(
+                        {'product_id': 'This product already has a barcode.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
-        return Response({"barcode": barcode}, status=status.HTTP_200_OK)
+            try:
+                barcode = generate_unique_in_store_ean13()
+            except RuntimeError as error:
+                return Response(
+                    {"error": str(error)},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+            record = GeneratedBarcode.objects.create(
+                barcode=barcode,
+                product=product,
+                generated_by=request.user,
+            )
+            if product is not None:
+                product.barcode = barcode
+                product.save(update_fields=['barcode'])
+
+        return Response(GeneratedBarcodeSerializer(record).data, status=status.HTTP_201_CREATED)
+
+
+class GeneratedBarcodeListAPIView(ListAPIView):
+    permission_classes = [IsAdminUser]
+    serializer_class = GeneratedBarcodeSerializer
+    queryset = GeneratedBarcode.objects.select_related('product', 'generated_by').all()
 
 
 class ProductViewSet(viewsets.ModelViewSet):
