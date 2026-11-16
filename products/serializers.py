@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Bundle, FlashSale, Product
+from .models import Bundle, FlashSale, GeneratedBarcode, Product
 from stock.models import Inventory
 from decimal import Decimal
 from reviews.serializers import ProductReviewSerializer
@@ -20,6 +20,18 @@ class ProductImageField(serializers.ImageField):
         if size is not None and size > MAX_PRODUCT_IMAGE_SIZE:
             raise serializers.ValidationError("Image must be 10 MB or smaller.")
         return super().to_internal_value(data)
+
+
+class GeneratedBarcodeSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    generated_by_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = GeneratedBarcode
+        fields = [
+            'id', 'barcode', 'product', 'product_name',
+            'generated_by_id', 'created_at',
+        ]
 
 
 class ProductSerializer(serializers.ModelSerializer):

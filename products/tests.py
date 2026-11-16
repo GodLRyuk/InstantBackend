@@ -162,7 +162,7 @@ class GenerateBarcodeAPITests(TestCase):
 
         response = self.client.post(self.url)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 201)
         barcode = response.data["barcode"]
         self.assertRegex(barcode, r"^2\d{12}$")
         self.assertEqual(Product.objects.count(), 0)

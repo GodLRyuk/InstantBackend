@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 from .views import (
     GenerateBarcodeAPIView,
+    GeneratedBarcodeListAPIView,
     BundleAdminDetailAPIView,
     BundleAdminListAPIView,
     FlashSaleAdminDetailAPIView,
@@ -42,6 +43,11 @@ urlpatterns = [
         'generate-barcode/',
         GenerateBarcodeAPIView.as_view(),
         name='generate-barcode',
+    ),
+    path(
+        'generated-barcodes/',
+        GeneratedBarcodeListAPIView.as_view(),
+        name='generated-barcodes',
     ),
     path('new-arrivals/', new_arrivals),
     path('recommended/', recommended_products), 
