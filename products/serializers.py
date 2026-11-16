@@ -32,8 +32,14 @@ class ProductSerializer(serializers.ModelSerializer):
     unit_name = serializers.CharField(source="unit.name", read_only=True)
 
     discounted_price = serializers.SerializerMethodField()
+    discount_amount = serializers.SerializerMethodField()
+    mrp = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True
+    )
     selling_price = serializers.SerializerMethodField()
-    purchase_price = serializers.SerializerMethodField()
+    purchase_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True
+    )
     current_batch_no = serializers.SerializerMethodField()
     stock = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
@@ -49,9 +55,9 @@ class ProductSerializer(serializers.ModelSerializer):
             "subcategory", "subcategory_id", "subcategory_name",
             "brand", "brand_name",
             "unit", "unit_name", "unit_size",
-            "price", "discount_percent",
+            "price", "mrp", "discount_percent",
             "selling_price", "purchase_price", "current_batch_no",
-            "discounted_price",
+            "discounted_price", "discount_amount",
             "stock",
             "barcode",
             "image", "image_url",
@@ -62,16 +68,24 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_discounted_price(self, obj):
         return float(obj.discounted_price())
 
+    def get_discount_amount(self, obj):
+        return float(obj.current_selling_price() - obj.discounted_price())
+
     def get_selling_price(self, obj):
         batch = _current_stock_batch(obj)
         return str(batch.selling_price if batch else obj.price)
 
-    def get_purchase_price(self, obj):
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
         request = self.context.get("request")
+        batch = _current_stock_batch(instance)
+        if data["mrp"] is None:
+            data["mrp"] = str(instance.current_selling_price())
         if not request or not request.user.is_staff:
-            return None
-        batch = _current_stock_batch(obj)
-        return str(batch.purchase_price) if batch else None
+            data["purchase_price"] = None
+        elif batch:
+            data["purchase_price"] = str(batch.purchase_price)
+        return data
 
     def get_current_batch_no(self, obj):
         batch = _current_stock_batch(obj)
@@ -116,8 +130,14 @@ class ProductListSerializer(serializers.ModelSerializer):
     brand_name = serializers.CharField(source="brand.name", read_only=True)
     unit_name = serializers.CharField(source="unit.name", read_only=True)
     discounted_price = serializers.SerializerMethodField()
+    discount_amount = serializers.SerializerMethodField()
+    mrp = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True
+    )
     selling_price = serializers.SerializerMethodField()
-    purchase_price = serializers.SerializerMethodField()
+    purchase_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True
+    )
     current_batch_no = serializers.SerializerMethodField()
     stock = serializers.SerializerMethodField()
     image = serializers.SerializerMethodField()
@@ -139,11 +159,13 @@ class ProductListSerializer(serializers.ModelSerializer):
             "unit_size",
             "unit_name",
             "price",
+            "mrp",
             "discount_percent",
             "selling_price",
             "purchase_price",
             "current_batch_no",
             "discounted_price",
+            "discount_amount",
             "stock",
             "barcode",
             "image",
@@ -155,16 +177,24 @@ class ProductListSerializer(serializers.ModelSerializer):
     def get_discounted_price(self, obj):
         return float(obj.discounted_price())
 
+    def get_discount_amount(self, obj):
+        return float(obj.current_selling_price() - obj.discounted_price())
+
     def get_selling_price(self, obj):
         batch = _current_stock_batch(obj)
         return str(batch.selling_price if batch else obj.price)
 
-    def get_purchase_price(self, obj):
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
         request = self.context.get("request")
+        batch = _current_stock_batch(instance)
+        if data["mrp"] is None:
+            data["mrp"] = str(instance.current_selling_price())
         if not request or not request.user.is_staff:
-            return None
-        batch = _current_stock_batch(obj)
-        return str(batch.purchase_price) if batch else None
+            data["purchase_price"] = None
+        elif batch:
+            data["purchase_price"] = str(batch.purchase_price)
+        return data
 
     def get_current_batch_no(self, obj):
         batch = _current_stock_batch(obj)
