@@ -177,6 +177,7 @@ class CustomerOrderViewSet(
         return Response(
             {
                 'restaurant_id': quote['restaurant'].id,
+                'distance_km': quote['distance_km'],
                 'item_total': _money(bill.item_total),
                 'discount': _money(bill.discount),
                 'delivery_fee': _money(bill.delivery_fee),

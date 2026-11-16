@@ -155,8 +155,8 @@ class Bill:
         return self.item_total - self.discount + self.delivery_fee + self.packaging + self.gst
 
 
-def calculate_bill(restaurant, lines):
-    """lines: iterable of (menu_item, quantity). Same maths as the Flutter cart."""
+def calculate_bill(restaurant, lines, distance_km=None):
+    """Price a restaurant cart, including the distance-based delivery surcharge."""
     lines = list(lines)
     item_total = sum((Decimal(i.price) * q for i, q in lines), Decimal('0'))
     packaging = sum((Decimal(i.packaging_charge) for i, _ in lines), Decimal('0'))  # once per dish
@@ -170,7 +170,11 @@ def calculate_bill(restaurant, lines):
             discount = cap
 
     gst = whole_rupees((item_total - discount) * GST_RATE)
-    return Bill(item_total, discount, Decimal(restaurant.delivery_fee), packaging, gst)
+    delivery_fee = Decimal(restaurant.delivery_fee)
+    if distance_km is not None and distance_km > 1:
+        delivery_fee += Decimal(str(distance_km)) * Decimal('8')
+
+    return Bill(item_total, discount, delivery_fee.quantize(Decimal('0.01')), packaging, gst)
 
 
 # ---------------------------------------------------------------- address
@@ -230,23 +234,34 @@ def build_quote(user, restaurant_id, items, address_id=None):
             raise ValidationError({'items': f'You can order at most 20 of "{item.name}".'})
         lines.append((item, qty))
 
-    bill = calculate_bill(restaurant, lines)
-    if bill.item_total < restaurant.min_order_amount:
-        raise ValidationError(
-            {'items': f'Minimum order for this restaurant is Rs {restaurant.min_order_amount:.0f}.'}
-        )
-
     address = None
+    distance_km = None
     if address_id is not None:
         address = resolve_address(user, address_id)
-        if address['lat'] is not None and restaurant.latitude is not None:
+        if all(
+            value is not None
+            for value in (address['lat'], address['lng'], restaurant.latitude, restaurant.longitude)
+        ):
             km = haversine_km(address['lat'], address['lng'], restaurant.latitude, restaurant.longitude)
+            distance_km = km
             if km > float(restaurant.delivery_radius_km):
                 raise ValidationError(
                     {'address_id': 'This restaurant does not deliver to your location.'}
                 )
 
-    return {'restaurant': restaurant, 'lines': lines, 'bill': bill, 'address': address}
+    bill = calculate_bill(restaurant, lines, distance_km=distance_km)
+    if bill.item_total < restaurant.min_order_amount:
+        raise ValidationError(
+            {'items': f'Minimum order for this restaurant is Rs {restaurant.min_order_amount:.0f}.'}
+        )
+
+    return {
+        'restaurant': restaurant,
+        'lines': lines,
+        'bill': bill,
+        'address': address,
+        'distance_km': distance_km,
+    }
 
 
 # ---------------------------------------------------------------- Cashfree
