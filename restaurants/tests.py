@@ -60,6 +60,18 @@ class BillTests(SimpleTestCase):
         bill = calculate_bill(restaurant(offer_max_discount=0), [(item('1000'), 1)])
         self.assertEqual(bill.discount, Decimal('300'))
 
+    def test_delivery_fee_stays_base_within_one_kilometre(self):
+        bill = calculate_bill(restaurant(delivery_fee=Decimal('30')), [(item('100'), 1)], distance_km=1)
+        self.assertEqual(bill.delivery_fee, Decimal('30'))
+
+    def test_delivery_fee_adds_eight_above_one_kilometre(self):
+        bill = calculate_bill(restaurant(delivery_fee=Decimal('30')), [(item('100'), 1)], distance_km=1.01)
+        self.assertEqual(bill.delivery_fee, Decimal('38.08'))
+
+    def test_delivery_fee_adds_eight_for_each_kilometre(self):
+        bill = calculate_bill(restaurant(delivery_fee=Decimal('30')), [(item('100'), 1)], distance_km=4)
+        self.assertEqual(bill.delivery_fee, Decimal('62.00'))
+
 
 class UtilTests(SimpleTestCase):
     def test_rounding_goes_up_on_half(self):
