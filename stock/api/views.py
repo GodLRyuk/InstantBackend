@@ -8,12 +8,14 @@ from stock.models import Inventory, StockBatch
 from rest_framework.generics import ListAPIView
 from django.shortcuts import get_object_or_404
 from ..serializers import InventorySerializer, StockBatchSerializer
+from django.db import transaction
 from django.db.models import Sum
 
 class AddStockAPIView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request):
 
         if not request.user.is_staff:
@@ -49,15 +51,14 @@ class AddStockAPIView(APIView):
         inventory.total_stock += quantity
         inventory.save()
 
-        # Optional: Update product selling price
-        # if selling_price:
-        #     product.price = selling_price
-        #     product.save()
+        product.price = selling_price
+        product.save(update_fields=["price"])
 
         return Response({
             "message": "Stock added successfully",
             "batch_id": batch.id,
-            "total_stock": inventory.total_stock
+            "total_stock": inventory.total_stock,
+            "product_price": str(product.price),
         }, status=status.HTTP_201_CREATED)
 class UpdateStockAPIView(APIView):
     """

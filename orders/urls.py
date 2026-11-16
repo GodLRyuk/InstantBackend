@@ -9,6 +9,7 @@ from .views import (
     RecordRemittanceAPIView,
     UpdateOrderStatusView,
     CreateOrderView,
+    CreateStoreSaleView,
     ValidateOrderView,
     VerifyPaymentView,
     AutoAssignDriverAPIView,
@@ -23,6 +24,7 @@ urlpatterns = [
     # ── static paths first (no <int:pk>) ──────────────────────
     path('orders/', OrderListView.as_view()),
     path('orders/create/', CreateOrderView.as_view()),
+    path('orders/store/create/', CreateStoreSaleView.as_view()),
     path('orders/validate/', ValidateOrderView.as_view()),
     path('orders/auto-assign-driver/', AutoAssignDriverAPIView.as_view()),
     path('orders/slots/', get_delivery_slots, name='delivery-slots'),  # 👈 moved here

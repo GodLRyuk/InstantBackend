@@ -179,7 +179,7 @@ class SalesReportExcelAPIView(APIView):
             "Order ID", "Date", "Customer Name", "Customer Email", "Customer Phone",
             "Product Name", "Batch No", "Quantity", "Unit Price", "Item Total",
             "Order Discount", "Delivery Fee", "Coupon Code",
-            "Order Total", "Order Status", "Payment Method",
+            "Order Total", "Order Status", "Payment Method", "Order Channel",
         ]
         ws.append(headers)
 
@@ -189,7 +189,12 @@ class SalesReportExcelAPIView(APIView):
 
         for order in qs:
             customer = order.user
-            customer_name = f"{customer.first_name or ''} {customer.last_name or ''}".strip() or customer.username
+            customer_name = (
+                f"{customer.first_name or ''} {customer.last_name or ''}".strip() or customer.username
+                if customer else "Walk-in"
+            )
+            customer_email = customer.email if customer else ""
+            customer_phone = customer.phone if customer else ""
             coupon_code = order.coupon.code if order.coupon else ""
 
             order_total = float(order.total_amount)
@@ -204,10 +209,10 @@ class SalesReportExcelAPIView(APIView):
             if not items:
                 ws.append([
                     order.id, order.created_at.strftime('%Y-%m-%d %H:%M'),
-                    customer_name, customer.email, getattr(customer, 'phone', ''),
+                    customer_name, customer_email, customer_phone,
                     "", "", "", "", "",
                     float(order.discount_amount), float(order.delivery_fee), coupon_code,
-                    order_total, order.order_status, order.payment_method,
+                    order_total, order.order_status, order.payment_method, order.order_channel,
                 ])
                 continue
 
@@ -216,8 +221,8 @@ class SalesReportExcelAPIView(APIView):
                     order.id,
                     order.created_at.strftime('%Y-%m-%d %H:%M'),
                     customer_name,
-                    customer.email,
-                    getattr(customer, 'phone', ''),
+                    customer_email,
+                    customer_phone,
                     item.product.name,
                     item.batch.batch_no if item.batch else "",
                     item.quantity,
@@ -229,6 +234,7 @@ class SalesReportExcelAPIView(APIView):
                     order_total,
                     order.order_status,
                     order.payment_method,
+                    order.order_channel,
                 ])
 
         for i, _ in enumerate(headers, 1):
@@ -242,9 +248,9 @@ class SalesReportExcelAPIView(APIView):
         blank_row = [""] * len(headers)
         ws.append(blank_row)
 
-        total_row_idx = ["", "", "", "", "", "", "", "", "", "", "", "", "Grand Total", grand_total, "", ""]
-        cod_row_idx = ["", "", "", "", "", "", "", "", "", "", "", "", "COD Total", cod_total, "", ""]
-        online_row_idx = ["", "", "", "", "", "", "", "", "", "", "", "", "Online Total", online_total, "", ""]
+        total_row_idx = ["", "", "", "", "", "", "", "", "", "", "", "", "Grand Total", grand_total, "", "", ""]
+        cod_row_idx = ["", "", "", "", "", "", "", "", "", "", "", "", "COD Total", cod_total, "", "", ""]
+        online_row_idx = ["", "", "", "", "", "", "", "", "", "", "", "", "Online Total", online_total, "", "", ""]
 
         ws.append(total_row_idx)
         ws.append(cod_row_idx)

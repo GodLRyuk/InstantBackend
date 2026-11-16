@@ -82,3 +82,48 @@ class StockBatchDeletionTests(TestCase):
 
         self.inventory.refresh_from_db()
         self.assertEqual(self.inventory.total_stock, 6)
+
+
+class AddStockPriceTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="stock-price-admin",
+            email="stock-price-admin@example.com",
+            password="test-password",
+            phone="5555555556",
+            role="ADMIN",
+            is_staff=True,
+        )
+        category = Category.objects.create(name="Stock price category")
+        subcategory = SubCategory.objects.create(
+            name="Stock price subcategory",
+            category=category,
+        )
+        unit = Unit.objects.create(name="Stock price piece", short_name="spc")
+        self.product = Product.objects.create(
+            name="Stock price product",
+            category=category,
+            subcategory=subcategory,
+            unit=unit,
+            price="10.00",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+    def test_adding_stock_updates_product_price_from_batch_selling_price(self):
+        response = self.client.post(
+            "/api/stock/add/",
+            {
+                "product": self.product.id,
+                "quantity": 3,
+                "batch_no": "price-batch-1",
+                "purchase_price": "7.00",
+                "selling_price": "12.50",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.product.refresh_from_db()
+        self.assertEqual(str(self.product.price), "12.50")
+        self.assertEqual(response.data["product_price"], "12.50")

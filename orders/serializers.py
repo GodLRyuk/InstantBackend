@@ -21,6 +21,8 @@ from decimal import Decimal
 import logging
 
 from payments import cashfree
+from accounts.models import User
+from stock.models import Inventory
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,7 @@ class OrderSerializer(serializers.ModelSerializer):
     coupon_code = serializers.CharField(source='coupon.code', read_only=True)
     cashfree_order_id = serializers.CharField(read_only=True)
     cashfree_payment_id = serializers.CharField(read_only=True)
+    created_by_id = serializers.IntegerField(read_only=True)
     address = serializers.SerializerMethodField()
     driver_id = serializers.SerializerMethodField()
     delivery_otp = serializers.SerializerMethodField()
@@ -63,6 +66,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'cashfree_order_id', 'cashfree_payment_id', 'address',
             'delivery_type', 'scheduled_date', 'scheduled_slot_start',
             'scheduled_slot_end', 'driver_id', 'delivery_otp',
+            'order_channel', 'payment_method', 'created_by_id',
         ]
 
     def get_address(self, obj):
@@ -70,9 +74,99 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_delivery_otp(self, obj):
         request = self.context.get('request')
-        if request and request.user == obj.user:
+        if request and obj.order_channel == "ONLINE" and request.user == obj.user:
             return obj.delivery_otp
         return None
+
+
+class StoreSaleItemSerializer(serializers.Serializer):
+    product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.filter(is_active=True)
+    )
+    quantity = serializers.IntegerField(min_value=1)
+
+
+class CreateStoreSaleSerializer(serializers.Serializer):
+    items = StoreSaleItemSerializer(many=True)
+    customer_id = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(),
+        source="customer",
+        required=False,
+        allow_null=True,
+    )
+    payment_method = serializers.ChoiceField(choices=["CASH", "UPI", "CARD"])
+
+    def validate_items(self, items):
+        if not items:
+            raise serializers.ValidationError("A store sale must contain at least one item.")
+        product_ids = [item["product"].pk for item in items]
+        if len(product_ids) != len(set(product_ids)):
+            raise serializers.ValidationError("Each product can only appear once.")
+        return items
+
+    @transaction.atomic
+    def create(self, validated_data):
+        from .models import Order
+
+        request = self.context["request"]
+        customer = validated_data.get("customer")
+        total_amount = Decimal("0.00")
+        sale_items = []
+        for item in validated_data["items"]:
+            product = Product.objects.select_for_update().get(pk=item["product"].pk)
+            quantity = item["quantity"]
+            try:
+                inventory = Inventory.objects.select_for_update().get(product=product)
+            except Inventory.DoesNotExist as exc:
+                raise serializers.ValidationError(
+                    {"items": f"Inventory is not configured for {product.name}."}
+                ) from exc
+
+            if inventory.available_stock() < quantity:
+                raise serializers.ValidationError(
+                    {"items": f"Insufficient stock for {product.name}."}
+                )
+
+            price = Decimal(str(product.discounted_price()))
+            batch = (
+                StockBatch.objects.select_for_update()
+                .filter(product=product, quantity__gte=quantity)
+                .order_by("created_at")
+                .first()
+            )
+            sale_items.append((product, inventory, batch, quantity, price))
+            total_amount += price * quantity
+
+        order = Order.objects.create(
+            user=customer,
+            created_by=request.user,
+            order_channel="STORE",
+            total_amount=total_amount,
+            delivery_fee=Decimal("0.00"),
+            payment_method=validated_data["payment_method"],
+            payment_status="PAID",
+            order_status="CONFIRMED",
+        )
+
+        for product, inventory, batch, quantity, price in sale_items:
+            if batch:
+                batch.quantity -= quantity
+                batch.save(update_fields=["quantity"])
+
+            inventory.total_stock -= quantity
+            inventory.save(update_fields=["total_stock", "updated_at"])
+
+            item_total = price * quantity
+            OrderItem.objects.create(
+                order=order,
+                product=product,
+                quantity=quantity,
+                price=price,
+                total_price=item_total,
+                batch=batch,
+            )
+
+        return order
 
 
 class CreateOrderItemSerializer(serializers.Serializer):
