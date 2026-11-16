@@ -18,6 +18,7 @@ from rest_framework.response import Response
 from rest_framework import serializers, status
 import hmac
 from orders.models import Order, DeliveryAssignment, generate_delivery_otp
+from stock.models import StoreSale
 from orders.services.driver_assignment import User, assign_driver
 from django.core.mail import send_mail
 from orders.utils import notify_driver
@@ -79,6 +80,25 @@ class CreateStoreSaleView(APIView):
         serializer.is_valid(raise_exception=True)
         sale = serializer.save()
         return Response(StoreSaleSerializer(sale).data, status=status.HTTP_201_CREATED)
+
+
+class StoreSaleListView(ListAPIView):
+    """List direct store sales; these are not records from the Order table."""
+
+    serializer_class = StoreSaleSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = StoreSale.objects.select_related(
+            "created_by", "customer"
+        ).prefetch_related(
+            "items__product", "items__batch"
+        ).order_by("-created_at", "-id")
+
+        user = self.request.user
+        if user.is_staff or getattr(user, "role", None) == "ADMIN":
+            return queryset
+        return queryset.filter(created_by=user)
 
 
 class CancelOrderView(APIView):

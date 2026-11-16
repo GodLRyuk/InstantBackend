@@ -10,6 +10,7 @@ from .views import (
     UpdateOrderStatusView,
     CreateOrderView,
     CreateStoreSaleView,
+    StoreSaleListView,
     ValidateOrderView,
     VerifyPaymentView,
     AutoAssignDriverAPIView,
@@ -25,6 +26,7 @@ urlpatterns = [
     path('orders/', OrderListView.as_view()),
     path('orders/create/', CreateOrderView.as_view()),
     path('store/sales/create/', CreateStoreSaleView.as_view()),
+    path('store/sales/', StoreSaleListView.as_view()),
     # Kept temporarily for existing clients; this also writes only StoreSale data.
     path('orders/store/create/', CreateStoreSaleView.as_view()),
     path('orders/validate/', ValidateOrderView.as_view()),
