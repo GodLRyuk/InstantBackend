@@ -214,6 +214,25 @@ class StoreSaleApiTests(TestCase):
         self.assertEqual(self.inventory.total_stock, 5)
         self.assertEqual(self.batch.quantity, 5)
 
+    def test_store_sales_list_returns_direct_store_sales(self):
+        create_response = self.client.post(
+            "/api/store/sales/create/",
+            {
+                "items": [{"product": self.product.id, "quantity": 1}],
+                "payment_method": "UPI",
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201)
+
+        response = self.client.get("/api/store/sales/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], create_response.data["id"])
+        self.assertEqual(response.data[0]["items"][0]["product"], self.product.id)
+        self.assertFalse(Order.objects.exists())
+
     def test_existing_orders_default_to_online_channel(self):
         order = Order.objects.create(user=self.seller, total_amount="1.00")
 
