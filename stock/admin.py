@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Inventory, StockBatch
+from .models import Inventory, StockBatch, StoreSale, StoreSaleItem
 
 
 class StockStatusFilter(admin.SimpleListFilter):
@@ -48,3 +48,17 @@ class StockBatchAdmin(admin.ModelAdmin):
     list_display = ('product', 'batch_no', 'quantity', 'purchase_price', 'selling_price', 'created_at')
     list_filter = ('product', StockStatusFilter)
     search_fields = ('product__name', 'batch_no')
+
+
+class StoreSaleItemInline(admin.TabularInline):
+    model = StoreSaleItem
+    extra = 0
+    readonly_fields = ('product', 'batch', 'quantity', 'price', 'total_price')
+
+
+@admin.register(StoreSale)
+class StoreSaleAdmin(admin.ModelAdmin):
+    list_display = ('id', 'created_by', 'customer', 'total_amount', 'payment_method', 'created_at')
+    list_filter = ('payment_method', 'created_at')
+    search_fields = ('created_by__username', 'customer__username')
+    inlines = [StoreSaleItemInline]
