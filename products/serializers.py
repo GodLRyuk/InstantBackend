@@ -33,9 +33,6 @@ class ProductSerializer(serializers.ModelSerializer):
 
     discounted_price = serializers.SerializerMethodField()
     discount_amount = serializers.SerializerMethodField()
-    mrp = serializers.DecimalField(
-        max_digits=10, decimal_places=2, required=False, allow_null=True
-    )
     selling_price = serializers.SerializerMethodField()
     purchase_price = serializers.DecimalField(
         max_digits=10, decimal_places=2, required=False, allow_null=True
@@ -55,7 +52,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "subcategory", "subcategory_id", "subcategory_name",
             "brand", "brand_name",
             "unit", "unit_name", "unit_size",
-            "price", "mrp", "discount_percent",
+            "price", "discount_percent",
             "selling_price", "purchase_price", "current_batch_no",
             "discounted_price", "discount_amount",
             "stock",
@@ -69,7 +66,7 @@ class ProductSerializer(serializers.ModelSerializer):
         return float(obj.discounted_price())
 
     def get_discount_amount(self, obj):
-        return float(obj.current_mrp() - obj.discounted_price())
+        return float(obj.discount_base_price() - obj.discounted_price())
 
     def get_selling_price(self, obj):
         batch = _current_stock_batch(obj)
@@ -79,8 +76,6 @@ class ProductSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         request = self.context.get("request")
         batch = _current_stock_batch(instance)
-        if data["mrp"] is None:
-            data["mrp"] = str(instance.current_selling_price())
         data["discount_percent"] = str(instance.effective_discount_percent())
         if not request or not request.user.is_staff:
             data["purchase_price"] = None
@@ -132,9 +127,6 @@ class ProductListSerializer(serializers.ModelSerializer):
     unit_name = serializers.CharField(source="unit.name", read_only=True)
     discounted_price = serializers.SerializerMethodField()
     discount_amount = serializers.SerializerMethodField()
-    mrp = serializers.DecimalField(
-        max_digits=10, decimal_places=2, required=False, allow_null=True
-    )
     selling_price = serializers.SerializerMethodField()
     purchase_price = serializers.DecimalField(
         max_digits=10, decimal_places=2, required=False, allow_null=True
@@ -160,7 +152,6 @@ class ProductListSerializer(serializers.ModelSerializer):
             "unit_size",
             "unit_name",
             "price",
-            "mrp",
             "discount_percent",
             "selling_price",
             "purchase_price",
@@ -179,7 +170,7 @@ class ProductListSerializer(serializers.ModelSerializer):
         return float(obj.discounted_price())
 
     def get_discount_amount(self, obj):
-        return float(obj.current_mrp() - obj.discounted_price())
+        return float(obj.discount_base_price() - obj.discounted_price())
 
     def get_selling_price(self, obj):
         batch = _current_stock_batch(obj)
@@ -189,8 +180,6 @@ class ProductListSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         request = self.context.get("request")
         batch = _current_stock_batch(instance)
-        if data["mrp"] is None:
-            data["mrp"] = str(instance.current_selling_price())
         data["discount_percent"] = str(instance.effective_discount_percent())
         if not request or not request.user.is_staff:
             data["purchase_price"] = None
