@@ -13,8 +13,8 @@ class DeliveryAssignmentInline(admin.TabularInline):
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "total_amount", "discount_amount", "coupon", "payment_status", "order_status", "created_at")
-    list_filter = ("order_status", "payment_status", "created_at")
+    list_display = ("id", "order_channel", "user", "created_by", "total_amount", "discount_amount", "coupon", "payment_status", "order_status", "created_at")
+    list_filter = ("order_channel", "order_status", "payment_status", "created_at")
     inlines = [OrderItemInline, DeliveryAssignmentInline]  # ✅ shows assignment inside order
 
 @admin.register(DeliveryAssignment)

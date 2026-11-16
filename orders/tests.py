@@ -12,6 +12,7 @@ from orders.models import (
 )
 from orders.serializers import OrderItemSerializer
 from products.models import Product
+from stock.models import Inventory, StockBatch
 
 
 class OrderItemSerializerTests(TestCase):
@@ -136,3 +137,84 @@ class CashfreeCheckoutIntentTests(TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data["payment_status"], "PENDING")
         self.assertFalse(Order.objects.exists())
+
+
+class StoreSaleApiTests(TestCase):
+    def setUp(self):
+        self.seller = User.objects.create_user(
+            username="store-seller",
+            email="seller@example.com",
+            password="test-password",
+            phone="6666666666",
+            role="CUSTOMER",
+        )
+        category = Category.objects.create(name="Store Sale Food")
+        subcategory = SubCategory.objects.create(
+            name="Store Sale Dairy",
+            category=category,
+        )
+        self.product = Product.objects.create(
+            name="Store Sale Milk",
+            category=category,
+            subcategory=subcategory,
+            price="15.00",
+        )
+        self.inventory = self.product.inventory
+        self.inventory.total_stock = 5
+        self.inventory.save(update_fields=["total_stock"])
+        self.batch = StockBatch.objects.create(
+            product=self.product,
+            batch_no="STORE-SALE-1",
+            quantity=5,
+            purchase_price="8.00",
+            selling_price="12.50",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.seller)
+
+    def test_store_sale_creates_walk_in_bill_and_deducts_stock(self):
+        response = self.client.post(
+            "/api/orders/store/create/",
+            {
+                "items": [{"product": self.product.id, "quantity": 2}],
+                "payment_method": "CASH",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        order = Order.objects.get(pk=response.data["id"])
+        self.assertEqual(order.order_channel, "STORE")
+        self.assertIsNone(order.user)
+        self.assertEqual(order.created_by, self.seller)
+        self.assertEqual(order.payment_method, "CASH")
+        self.assertEqual(order.payment_status, "PAID")
+        self.assertEqual(str(order.total_amount), "25.00")
+        self.assertEqual(response.data["order_channel"], "STORE")
+
+        self.inventory.refresh_from_db()
+        self.batch.refresh_from_db()
+        self.assertEqual(self.inventory.total_stock, 3)
+        self.assertEqual(self.batch.quantity, 3)
+
+    def test_store_sale_with_insufficient_stock_does_not_create_bill(self):
+        response = self.client.post(
+            "/api/orders/store/create/",
+            {
+                "items": [{"product": self.product.id, "quantity": 6}],
+                "payment_method": "UPI",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Order.objects.exists())
+        self.inventory.refresh_from_db()
+        self.batch.refresh_from_db()
+        self.assertEqual(self.inventory.total_stock, 5)
+        self.assertEqual(self.batch.quantity, 5)
+
+    def test_existing_orders_default_to_online_channel(self):
+        order = Order.objects.create(user=self.seller, total_amount="1.00")
+
+        self.assertEqual(order.order_channel, "ONLINE")

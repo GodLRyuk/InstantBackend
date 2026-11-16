@@ -13,6 +13,11 @@ def generate_delivery_otp():
 
 
 class Order(models.Model):
+    ORDER_CHANNEL_CHOICES = [
+        ("ONLINE", "Online"),
+        ("STORE", "Store"),
+    ]
+
     # Coupon & discount
     coupon = models.ForeignKey(Coupon, on_delete=models.SET_NULL, null=True, blank=True)
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -60,7 +65,19 @@ class Order(models.Model):
     scheduled_slot_start = models.TimeField(null=True, blank=True)
     scheduled_slot_end = models.TimeField(null=True, blank=True)
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_orders",
+    )
+    order_channel = models.CharField(
+        max_length=10,
+        choices=ORDER_CHANNEL_CHOICES,
+        default="ONLINE",
+    )
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
 
     payment_status = models.CharField(
@@ -132,7 +149,8 @@ class Order(models.Model):
             self.save()
 
     def __str__(self):
-        return f"Order #{self.id} - {self.user.email}"
+        customer = self.user.email if self.user else "Walk-in"
+        return f"Order #{self.id} - {customer}"
 
 
 class CashfreeCheckoutIntent(models.Model):

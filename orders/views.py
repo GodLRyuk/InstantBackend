@@ -5,7 +5,13 @@ from django.db.models.aggregates import Count
 from rest_framework.generics import ListAPIView, RetrieveAPIView, CreateAPIView
 from rest_framework.permissions import IsAuthenticated
 from .models import CashfreeCheckoutIntent, CashRemittance, CashRemittanceItem, Order
-from .serializers import CashRemittanceSerializer, OrderSerializer, CreateOrderSerializer, ValidateOrderSerializer
+from .serializers import (
+    CashRemittanceSerializer,
+    OrderSerializer,
+    CreateOrderSerializer,
+    CreateStoreSaleSerializer,
+    ValidateOrderSerializer,
+)
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import serializers, status
@@ -18,6 +24,7 @@ from promotions.models import Coupon, CouponUsage
 from datetime import date, timedelta, timezone              # 👈 add
 from orders.slot_utils import generate_slots      # 👈 add
 from rest_framework.decorators import api_view, permission_classes  # 👈 add
+from django.db.models import Q
 from orders.payment_fulfillment import (
     activate_paid_order,
     finalize_cashfree_checkout,
@@ -37,7 +44,9 @@ class OrderListView(ListAPIView):
         elif getattr(user, "role", None) == "DRIVER":
             return Order.objects.filter(driver=user).prefetch_related('items__product__subcategory').order_by('-id')
 
-        return Order.objects.filter(user=user).prefetch_related('items__product__subcategory').order_by('-id')
+        return Order.objects.filter(
+            Q(user=user) | Q(created_by=user)
+        ).prefetch_related('items__product__subcategory').order_by('-id')
 
 
 class OrderDetailView(RetrieveAPIView):
@@ -53,7 +62,22 @@ class OrderDetailView(RetrieveAPIView):
         elif getattr(user, "role", None) == "DRIVER":
             return Order.objects.filter(driver=user).prefetch_related('items__product__subcategory')
 
-        return Order.objects.filter(user=user).prefetch_related('items__product__subcategory')
+        return Order.objects.filter(
+            Q(user=user) | Q(created_by=user)
+        ).prefetch_related('items__product__subcategory')
+
+
+class CreateStoreSaleView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CreateStoreSaleSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save()
+        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
 
 class CancelOrderView(APIView):
