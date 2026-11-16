@@ -15,6 +15,12 @@ class Product(models.Model):
     barcode = models.CharField(max_length=100, blank=True, null=True, unique=True)
 
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    mrp = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    # Product-level cost is useful before the first stock batch exists. Batch
+    # purchase prices remain authoritative whenever an in-stock batch exists.
+    purchase_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
     discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
 
     description = models.TextField(blank=True, null=True)
@@ -40,7 +46,7 @@ class Product(models.Model):
 
     def __str__(self):
         return self.name
-    
+
 class FlashSale(models.Model):
     title = models.CharField(max_length=255, default="Flash Sale")
     products = models.ManyToManyField('Product', blank=True) 

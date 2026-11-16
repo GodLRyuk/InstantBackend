@@ -40,6 +40,8 @@ class ProductCreateAPIView(APIView):
             unit=unit,
             unit_size=request.data.get("unit_size"),
             price=request.data.get("price"),
+            mrp=request.data.get("mrp"),
+            purchase_price=request.data.get("purchase_price"),
             discount_percent=request.data.get("discount_percent", 0),
             description=request.data.get("description"),
             image=request.FILES.get("image"),
@@ -80,6 +82,7 @@ class ProductListAPIView(APIView):
             "unit_name": product.unit.name if product.unit else None,
             "unit_size": product.unit_size,
             "price": str(product.price),
+            "mrp": str(product.mrp if product.mrp is not None else product.current_selling_price()),
             "discount_percent": str(product.discount_percent),
             "final_price": str(product.discounted_price()),
             "description": product.description,   # ✅ comma added
@@ -105,6 +108,8 @@ class ProductUpdateAPIView(APIView):
 
         product.name = request.data.get("name", product.name)
         product.price = request.data.get("price", product.price)
+        product.mrp = request.data.get("mrp", product.mrp)
+        product.purchase_price = request.data.get("purchase_price", product.purchase_price)
         product.discount_percent = request.data.get("discount_percent", product.discount_percent)
         product.description = request.data.get("description", product.description)
         product.is_active = request.data.get("is_active", product.is_active)
