@@ -22,7 +22,7 @@ import logging
 
 from payments import cashfree
 from accounts.models import User
-from stock.models import Inventory
+from stock.models import Inventory, StoreSale, StoreSaleItem
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +106,6 @@ class CreateStoreSaleSerializer(serializers.Serializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        from .models import Order
-
         request = self.context["request"]
         customer = validated_data.get("customer")
         total_amount = Decimal("0.00")
@@ -137,15 +135,11 @@ class CreateStoreSaleSerializer(serializers.Serializer):
             sale_items.append((product, inventory, batch, quantity, price))
             total_amount += price * quantity
 
-        order = Order.objects.create(
-            user=customer,
+        sale = StoreSale.objects.create(
+            customer=customer,
             created_by=request.user,
-            order_channel="STORE",
             total_amount=total_amount,
-            delivery_fee=Decimal("0.00"),
             payment_method=validated_data["payment_method"],
-            payment_status="PAID",
-            order_status="CONFIRMED",
         )
 
         for product, inventory, batch, quantity, price in sale_items:
@@ -157,8 +151,8 @@ class CreateStoreSaleSerializer(serializers.Serializer):
             inventory.save(update_fields=["total_stock", "updated_at"])
 
             item_total = price * quantity
-            OrderItem.objects.create(
-                order=order,
+            StoreSaleItem.objects.create(
+                sale=sale,
                 product=product,
                 quantity=quantity,
                 price=price,
@@ -166,7 +160,26 @@ class CreateStoreSaleSerializer(serializers.Serializer):
                 batch=batch,
             )
 
-        return order
+        return sale
+
+
+class StoreSaleItemResponseSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    batch_no = serializers.CharField(source="batch.batch_no", read_only=True)
+
+    class Meta:
+        model = StoreSaleItem
+        fields = ["id", "product", "product_name", "batch", "batch_no", "quantity", "price", "total_price"]
+
+
+class StoreSaleSerializer(serializers.ModelSerializer):
+    items = StoreSaleItemResponseSerializer(many=True, read_only=True)
+    created_by_id = serializers.IntegerField(read_only=True)
+    customer_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = StoreSale
+        fields = ["id", "total_amount", "payment_method", "created_at", "created_by_id", "customer_id", "items"]
 
 
 class CreateOrderItemSerializer(serializers.Serializer):

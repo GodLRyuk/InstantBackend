@@ -10,6 +10,7 @@ from .serializers import (
     OrderSerializer,
     CreateOrderSerializer,
     CreateStoreSaleSerializer,
+    StoreSaleSerializer,
     ValidateOrderSerializer,
 )
 from rest_framework.views import APIView
@@ -76,8 +77,8 @@ class CreateStoreSaleView(APIView):
             context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
-        order = serializer.save()
-        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
+        sale = serializer.save()
+        return Response(StoreSaleSerializer(sale).data, status=status.HTTP_201_CREATED)
 
 
 class CancelOrderView(APIView):

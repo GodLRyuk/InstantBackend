@@ -13,6 +13,7 @@ from orders.models import (
 from orders.serializers import OrderItemSerializer
 from products.models import Product
 from stock.models import Inventory, StockBatch
+from stock.models import StoreSale
 
 
 class OrderItemSerializerTests(TestCase):
@@ -183,14 +184,12 @@ class StoreSaleApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        order = Order.objects.get(pk=response.data["id"])
-        self.assertEqual(order.order_channel, "STORE")
-        self.assertIsNone(order.user)
-        self.assertEqual(order.created_by, self.seller)
-        self.assertEqual(order.payment_method, "CASH")
-        self.assertEqual(order.payment_status, "PAID")
-        self.assertEqual(str(order.total_amount), "25.00")
-        self.assertEqual(response.data["order_channel"], "STORE")
+        sale = StoreSale.objects.get(pk=response.data["id"])
+        self.assertIsNone(sale.customer)
+        self.assertEqual(sale.created_by, self.seller)
+        self.assertEqual(sale.payment_method, "CASH")
+        self.assertEqual(str(sale.total_amount), "25.00")
+        self.assertFalse(Order.objects.exists())
 
         self.inventory.refresh_from_db()
         self.batch.refresh_from_db()
@@ -208,6 +207,7 @@ class StoreSaleApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+        self.assertFalse(StoreSale.objects.exists())
         self.assertFalse(Order.objects.exists())
         self.inventory.refresh_from_db()
         self.batch.refresh_from_db()

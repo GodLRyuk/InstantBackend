@@ -1,5 +1,6 @@
 from django.db import models
 from products.models import Product
+from accounts.models import User
 
 
 class Inventory(models.Model):
@@ -64,3 +65,38 @@ class StockAdjustment(models.Model):
 
     def __str__(self):
         return f"{self.adjust_type} {self.quantity} - {self.batch.batch_no} ({self.reason})"
+
+
+class StoreSale(models.Model):
+    PAYMENT_METHOD_CHOICES = (
+        ("CASH", "Cash"),
+        ("UPI", "UPI"),
+        ("CARD", "Card"),
+    )
+
+    customer = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="store_sales",
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True,
+        related_name="created_store_sales",
+    )
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_method = models.CharField(max_length=10, choices=PAYMENT_METHOD_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Store Sale #{self.id}"
+
+
+class StoreSaleItem(models.Model):
+    sale = models.ForeignKey(StoreSale, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    batch = models.ForeignKey(
+        StockBatch, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="store_sale_items",
+    )
+    quantity = models.PositiveIntegerField()
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    total_price = models.DecimalField(max_digits=10, decimal_places=2)
