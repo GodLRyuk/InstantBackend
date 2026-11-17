@@ -160,7 +160,7 @@ def create_vendor(*, vendor_id, name, email, phone, account_number, account_hold
     """Create a Cashfree Easy Split vendor (requires Easy Split enabled on merchant)."""
     body = {
         'vendor_id': vendor_id, 'status': 'ACTIVE', 'name': name[:100],
-        'email': email, 'phone': int(''.join(ch for ch in str(phone) if ch.isdigit())[-12:]),
+        'email': email, 'phone': ''.join(ch for ch in str(phone) if ch.isdigit())[-12:],
         'verify_account': True, 'dashboard_access': False, 'schedule_option': 1,
         'bank': {'account_number': int(account_number), 'account_holder': account_holder,
                  'ifsc': ifsc.upper()},
