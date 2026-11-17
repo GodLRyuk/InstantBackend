@@ -7,6 +7,10 @@ from .models import (
     Restaurant,
     RestaurantOrder,
     RestaurantOrderItem,
+    RestaurantVendor,
+    VendorCommission,
+    PaymentSplit,
+    RestaurantRefund,
 )
 
 
@@ -62,3 +66,33 @@ class RestaurantOrderAdmin(admin.ModelAdmin):
     search_fields = ['order_number', 'customer_phone', 'customer_name']
     inlines = [OrderItemInline]
     readonly_fields = ['order_number', 'created_at', 'updated_at']
+
+
+@admin.register(RestaurantVendor)
+class RestaurantVendorAdmin(admin.ModelAdmin):
+    list_display = ['restaurant', 'cashfree_vendor_id', 'verification_status', 'settlement_status', 'updated_at']
+    search_fields = ['restaurant__name', 'cashfree_vendor_id']
+    readonly_fields = ['cashfree_vendor_id', 'verification_status', 'settlement_status', 'last_cashfree_response']
+    fields = ['restaurant', 'cashfree_vendor_id', 'bank_account_number', 'ifsc_code',
+              'account_holder_name', 'verification_status', 'settlement_status', 'last_cashfree_response']
+
+
+@admin.register(VendorCommission)
+class VendorCommissionAdmin(admin.ModelAdmin):
+    list_display = ['restaurant', 'commission_percentage', 'effective_from']
+    list_filter = ['restaurant']
+
+
+@admin.register(PaymentSplit)
+class PaymentSplitAdmin(admin.ModelAdmin):
+    list_display = ['order', 'vendor', 'gross_amount', 'platform_commission', 'vendor_amount',
+                    'cashfree_split_status', 'settlement_id', 'paid_at']
+    list_filter = ['cashfree_split_status']
+    readonly_fields = [field.name for field in PaymentSplit._meta.fields]
+
+
+@admin.register(RestaurantRefund)
+class RestaurantRefundAdmin(admin.ModelAdmin):
+    list_display = ['order', 'refund_id', 'amount', 'status', 'cashfree_refund_id', 'updated_at']
+    list_filter = ['status']
+    readonly_fields = [field.name for field in RestaurantRefund._meta.fields]

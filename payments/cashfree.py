@@ -123,3 +123,75 @@ def payment_matches(payment, *, amount, currency='INR'):
 
 def parse_webhook(raw_body):
     return json.loads(raw_body.decode('utf-8'))
+
+
+def _request_idempotency_headers(key):
+    return {'x-idempotency-key': str(uuid.uuid5(uuid.NAMESPACE_URL, key)), 'x-request-id': str(uuid.uuid4())}
+
+
+def create_vendor(*, vendor_id, name, email, phone, account_number, account_holder, ifsc,
+                 pan, business_type, gstin=''):
+    """Create a Cashfree Easy Split vendor (requires Easy Split enabled on merchant)."""
+    body = {
+        'vendor_id': vendor_id, 'status': 'ACTIVE', 'name': name[:100],
+        'email': email, 'phone': ''.join(ch for ch in str(phone) if ch.isdigit())[-12:],
+        'verify_account': True, 'dashboard_access': False, 'schedule_option': 1,
+        'bank': {'account_number': int(account_number), 'account_holder': account_holder,
+                 'ifsc': ifsc.upper()},
+        'kyc_details': {
+            'account_type': 'BUSINESS', 'business_type': business_type,
+            'pan': pan.upper(), **({'gst': gstin.upper()} if gstin else {}),
+        },
+    }
+    response = requests.post(
+        f'{_base_url()}/easy-split/vendors', headers={**_headers(), **_request_idempotency_headers(f'vendor:{vendor_id}')},
+        json=body, timeout=20,
+    )
+    if not response.ok:
+        logger.error('Cashfree vendor creation failed: HTTP %s response=%s', response.status_code, response.text[:1000])
+        response.raise_for_status()
+    return response.json()
+
+
+def submit_order_split(order_id, *, vendor_id, vendor_percentage):
+    response = requests.post(
+        f'{_base_url()}/easy-split/orders/{order_id}/split',
+        headers={**_headers(), **_request_idempotency_headers(f'split:{order_id}')},
+        json={'split': [{'vendor_id': vendor_id, 'percentage': float(vendor_percentage)}],
+              'disable_split': True}, timeout=20,
+    )
+    if not response.ok:
+        logger.error('Cashfree split failed: HTTP %s response=%s', response.status_code, response.text[:1000])
+        response.raise_for_status()
+    return response.json()
+
+
+def get_order_split_details(order_id):
+    response = requests.get(
+        f'{_base_url()}/easy-split/orders/{order_id}', headers=_headers(), timeout=20,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def create_refund(order_id, *, refund_id, amount, note, refund_splits=None):
+    body = {'refund_id': refund_id, 'refund_amount': float(amount), 'refund_note': note[:100]}
+    if refund_splits:
+        body['refund_splits'] = refund_splits
+    response = requests.post(
+        f'{_base_url()}/orders/{order_id}/refunds',
+        headers={**_headers(), **_request_idempotency_headers(f'refund:{refund_id}')},
+        json=body, timeout=20,
+    )
+    if not response.ok:
+        logger.error('Cashfree refund failed: HTTP %s response=%s', response.status_code, response.text[:1000])
+        response.raise_for_status()
+    return response.json()
+
+
+def get_refund(order_id, refund_id):
+    response = requests.get(
+        f'{_base_url()}/orders/{order_id}/refunds/{refund_id}', headers=_headers(), timeout=20,
+    )
+    response.raise_for_status()
+    return response.json()

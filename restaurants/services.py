@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass
 from decimal import Decimal
+from django.utils import timezone
 
 from django.apps import apps
 from django.conf import settings
@@ -16,6 +17,7 @@ from .models import (
     RestaurantDeliveryAssignment,
     RestaurantOrder,
     RestaurantOrderItem,
+    RestaurantRefund,
 )
 from .utils import haversine_km, whole_rupees
 
@@ -349,6 +351,18 @@ def create_order(user, quote, payment_method, notes=''):
         except Exception as exc:  # noqa: BLE001 - any gateway problem rolls the order back
             raise PaymentGatewayError() from exc
         order.save(update_fields=['cashfree_order_id', 'cashfree_payment_session_id'])
+        vendor = getattr(restaurant, 'vendor', None)
+        if vendor and vendor.cashfree_vendor_id:
+            commission = restaurant.commissions.filter(effective_from__lte=timezone.now()).first()
+            rate = commission.commission_percentage if commission else Decimal('0')
+            gross = order.total_amount
+            platform_share = (gross * rate / Decimal('100')).quantize(Decimal('0.01'))
+            from .models import PaymentSplit
+            PaymentSplit.objects.create(
+                order=order, vendor=vendor, gross_amount=gross,
+                platform_commission=platform_share, vendor_amount=gross-platform_share,
+                commission_percentage=rate,
+            )
     elif order.status == RestaurantOrder.Status.PLACED:
         notify_restaurant_owner_order_placed(order)
     return order
@@ -401,6 +415,11 @@ def change_status(order_id, new_status, *, staff=False, reason='', allow=None, *
 
     order.status = new_status
     order.save()
+    if new_status in (S.REJECTED, S.CANCELLED) and order.payment_status == P.REFUND_PENDING:
+        RestaurantRefund.objects.get_or_create(
+            order=order,
+            defaults={'refund_id': f'rorefund{order.pk}', 'amount': order.total_amount},
+        )
     if new_status == S.ACCEPTED and not staff:
         dispatch_restaurant_order(order)
     # TODO: notify the customer / restaurant here (Channels or FCM).
