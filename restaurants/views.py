@@ -3,6 +3,7 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from decimal import Decimal
 import hmac
+from django.utils import timezone
 from rest_framework import generics, mixins, status as http, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
@@ -19,6 +20,9 @@ from .models import (
     Restaurant,
     RestaurantDeliveryAssignment,
     RestaurantOrder,
+    RestaurantVendor,
+    PaymentSplit,
+    RestaurantRefund,
 )
 from .permissions import IsStaffUser
 from .serializers import (
@@ -287,6 +291,10 @@ class CustomerOrderViewSet(
                     raise ValidationError({'detail': 'Payment verification failed.'})
                 order.payment_status = P.PAID
                 order.cashfree_payment_id = str(payment.get('cf_payment_id', ''))
+                split = getattr(order, 'payment_split', None)
+                if split and not split.paid_at:
+                    split.paid_at = timezone.now()
+                    split.save(update_fields=['paid_at', 'updated_at'])
                 if order.status == S.AWAITING_PAYMENT:
                     order.status = S.PLACED
                     services.notify_restaurant_owner_order_placed(order)
@@ -322,6 +330,226 @@ class PartnerOnboardView(APIView):
         s.is_valid(raise_exception=True)
         s.save(owner=request.user, status=Restaurant.Status.PENDING)
         return Response(s.data, status=http.HTTP_201_CREATED)
+
+
+class PartnerVendorView(APIView):
+    """Owner-managed Easy Split beneficiary onboarding; never returns full bank details."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        restaurant = partner_restaurant(request)
+        vendor = getattr(restaurant, 'vendor', None)
+        if not vendor:
+            return Response({'status': 'NOT_SUBMITTED'})
+        return Response({
+            'cashfree_vendor_id': vendor.cashfree_vendor_id,
+            'verification_status': vendor.verification_status,
+            'settlement_status': vendor.settlement_status,
+            'bank_account_last4': vendor.bank_account_number[-4:],
+            'ifsc_code': vendor.ifsc_code,
+        })
+
+    def post(self, request):
+        restaurant = partner_restaurant(request)
+        if restaurant.status != Restaurant.Status.APPROVED:
+            raise ValidationError({'detail': 'Restaurant approval is required before payment onboarding.'})
+        data = request.data
+        required = ('account_number', 'ifsc_code', 'account_holder_name', 'pan', 'business_type')
+        missing = [key for key in required if not str(data.get(key, '')).strip()]
+        if missing:
+            raise ValidationError({key: 'This field is required.' for key in missing})
+        account = str(data['account_number']).strip()
+        if not account.isdigit() or not 6 <= len(account) <= 18:
+            raise ValidationError({'account_number': 'Enter a valid bank account number.'})
+        ifsc = str(data['ifsc_code']).strip().upper()
+        import re
+        if not re.fullmatch(r'[A-Z]{4}0[A-Z0-9]{6}', ifsc):
+            raise ValidationError({'ifsc_code': 'Enter a valid IFSC code.'})
+        pan = str(data['pan']).strip().upper()
+        if not re.fullmatch(r'[A-Z]{5}[0-9]{4}[A-Z]', pan):
+            raise ValidationError({'pan': 'Enter a valid PAN.'})
+        business_type = str(data['business_type']).strip().upper()
+        if not re.fullmatch(r'[A-Z_]{3,40}', business_type):
+            raise ValidationError({'business_type': 'Use a Cashfree business type such as PROPRIETORSHIP or PRIVATE_LIMITED.'})
+        gstin = str(data.get('gstin', '')).strip().upper()
+        if gstin and not re.fullmatch(r'[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', gstin):
+            raise ValidationError({'gstin': 'Enter a valid GSTIN.'})
+        email = restaurant.email or request.user.email
+        phone = restaurant.phone or getattr(request.user, 'phone', '')
+        if not email or not phone:
+            raise ValidationError({'detail': 'Restaurant email and phone are required for Cashfree onboarding.'})
+        vendor, _ = RestaurantVendor.objects.get_or_create(
+            restaurant=restaurant,
+            defaults={'bank_account_number': account, 'ifsc_code': ifsc,
+                      'account_holder_name': str(data['account_holder_name']).strip(),
+                      'pan': pan, 'business_type': business_type, 'gstin': gstin},
+        )
+        if vendor.cashfree_vendor_id and (
+            vendor.bank_account_number != account or vendor.ifsc_code != ifsc
+            or vendor.account_holder_name != str(data['account_holder_name']).strip()
+            or vendor.pan != pan or vendor.business_type != business_type or vendor.gstin != gstin
+        ):
+            raise ValidationError({'detail': 'Bank details cannot be changed after vendor registration. Contact support.'})
+        if not vendor.cashfree_vendor_id:
+            vendor_id = f'restaurant_{restaurant.pk}'
+            try:
+                response = services.cashfree.create_vendor(
+                    vendor_id=vendor_id, name=restaurant.name,
+                    email=email, phone=phone, account_number=account,
+                    account_holder=vendor.account_holder_name, ifsc=ifsc,
+                    pan=pan, business_type=business_type, gstin=gstin,
+                )
+            except Exception as exc:
+                raise ValidationError({'detail': 'Cashfree vendor onboarding failed. Please retry later.'}) from exc
+            vendor.cashfree_vendor_id = vendor_id
+            vendor.verification_status = response.get('status', 'PENDING')
+            vendor.last_cashfree_response = response
+            vendor.save()
+        return self.get(request)
+
+
+class ProcessPaymentSplitsView(APIView):
+    """Cron-triggerable endpoint: submit paid orders after Cashfree's two-minute delay."""
+    permission_classes = [IsAuthenticated, IsStaffUser]
+
+    def post(self, request):
+        from datetime import timedelta
+        from django.utils import timezone
+        processed = 0
+        failed = 0
+        due = PaymentSplit.objects.select_related('order', 'vendor').filter(
+            cashfree_split_status__in=[PaymentSplit.Status.PENDING, PaymentSplit.Status.FAILED],
+            paid_at__lte=timezone.now() - timedelta(minutes=2),
+            order__payment_status=RestaurantOrder.PaymentStatus.PAID,
+        ).order_by('paid_at')[:100]
+        for candidate in due:
+            with transaction.atomic():
+                split = PaymentSplit.objects.select_for_update().get(pk=candidate.pk)
+                if split.cashfree_split_status not in [PaymentSplit.Status.PENDING, PaymentSplit.Status.FAILED]:
+                    continue
+                split.cashfree_split_status = PaymentSplit.Status.PROCESSING
+                split.save(update_fields=['cashfree_split_status', 'updated_at'])
+            try:
+                result = services.cashfree.submit_order_split(
+                    split.order.cashfree_order_id,
+                    vendor_id=split.vendor.cashfree_vendor_id,
+                    vendor_percentage=Decimal('100') - split.commission_percentage,
+                )
+                split.cashfree_response = result
+                split.cashfree_split_status = PaymentSplit.Status.SUBMITTED
+                split.save(update_fields=['cashfree_response', 'cashfree_split_status', 'updated_at'])
+                RestaurantVendor.objects.filter(pk=split.vendor_id).update(settlement_status='IN_PROGRESS')
+                processed += 1
+            except Exception:
+                split.cashfree_split_status = PaymentSplit.Status.FAILED
+                split.save(update_fields=['cashfree_split_status', 'updated_at'])
+                failed += 1
+        return Response({'processed': processed, 'failed': failed})
+
+
+class SyncPaymentSplitsView(APIView):
+    """Refresh Cashfree split and settlement references for submitted restaurant orders."""
+    permission_classes = [IsAuthenticated, IsStaffUser]
+
+    def post(self, request):
+        synced = 0
+        failed = 0
+        splits = PaymentSplit.objects.select_related('order', 'vendor').filter(
+            cashfree_split_status__in=[PaymentSplit.Status.SUBMITTED, PaymentSplit.Status.SETTLED]
+        ).order_by('updated_at')[:100]
+        for split in splits:
+            try:
+                details = services.cashfree.get_order_split_details(split.order.cashfree_order_id)
+            except Exception:
+                failed += 1
+                continue
+            vendors = details.get('vendors') or []
+            vendor_details = next((item for item in vendors
+                                   if item.get('vendor_id') == split.vendor.cashfree_vendor_id), {})
+            settlement_id = vendor_details.get('settlement_id')
+            if settlement_id:
+                split.settlement_id = str(settlement_id)
+            vendor_status = str(vendor_details.get('status', '')).upper()
+            if vendor_status in {'SUCCESS', 'SETTLED'}:
+                split.cashfree_split_status = PaymentSplit.Status.SETTLED
+                RestaurantVendor.objects.filter(pk=split.vendor_id).update(settlement_status='SETTLED')
+            split.cashfree_response = details
+            split.save(update_fields=['settlement_id', 'cashfree_split_status',
+                                      'cashfree_response', 'updated_at'])
+            synced += 1
+        return Response({'synced': synced, 'failed': failed})
+
+
+class ProcessRestaurantRefundsView(APIView):
+    """Initiate cancellation refunds and reconcile their Cashfree status."""
+    permission_classes = [IsAuthenticated, IsStaffUser]
+
+    def post(self, request):
+        processed = 0
+        failed = 0
+        refunds = RestaurantRefund.objects.select_related('order').filter(
+            status__in=[RestaurantRefund.Status.PENDING, RestaurantRefund.Status.FAILED],
+            order__payment_status=RestaurantOrder.PaymentStatus.REFUND_PENDING,
+        ).order_by('created_at')[:100]
+        for candidate in refunds:
+            with transaction.atomic():
+                refund = RestaurantRefund.objects.select_for_update().select_related(
+                    'order', 'order__payment_split', 'order__payment_split__vendor'
+                ).get(pk=candidate.pk)
+                if refund.status not in [RestaurantRefund.Status.PENDING, RestaurantRefund.Status.FAILED]:
+                    continue
+                refund.status = RestaurantRefund.Status.PROCESSING
+                refund.save(update_fields=['status', 'updated_at'])
+            split = getattr(refund.order, 'payment_split', None)
+            refund_splits = None
+            if split and split.cashfree_split_status in [PaymentSplit.Status.SUBMITTED, PaymentSplit.Status.SETTLED]:
+                refund_splits = [{'vendor_id': split.vendor.cashfree_vendor_id,
+                                  'amount': float(split.vendor_amount)}]
+            try:
+                result = services.cashfree.create_refund(
+                    refund.order.cashfree_order_id,
+                    refund_id=refund.refund_id,
+                    amount=refund.amount,
+                    note=refund.order.rejection_reason or 'Restaurant order cancelled',
+                    refund_splits=refund_splits,
+                )
+                refund.cashfree_refund_id = str(result.get('cf_refund_id', ''))
+                refund.cashfree_response = result
+                status_value = str(result.get('refund_status', 'PENDING')).upper()
+                refund.status = (RestaurantRefund.Status.SUCCESS if status_value == 'SUCCESS'
+                                 else RestaurantRefund.Status.SUBMITTED if status_value in {'PENDING', 'QUEUED'}
+                                 else RestaurantRefund.Status.FAILED)
+                refund.save(update_fields=['cashfree_refund_id', 'cashfree_response', 'status', 'updated_at'])
+                if refund.status == RestaurantRefund.Status.SUCCESS:
+                    RestaurantOrder.objects.filter(pk=refund.order_id).update(
+                        payment_status=RestaurantOrder.PaymentStatus.REFUNDED)
+                processed += 1
+            except Exception:
+                refund.status = RestaurantRefund.Status.FAILED
+                refund.save(update_fields=['status', 'updated_at'])
+                failed += 1
+        # Poll existing refunds in the same cron pass.
+        pending = RestaurantRefund.objects.select_related('order').filter(
+            status=RestaurantRefund.Status.SUBMITTED
+        ).order_by('updated_at')[:100]
+        synced = 0
+        for refund in pending:
+            try:
+                result = services.cashfree.get_refund(refund.order.cashfree_order_id, refund.refund_id)
+            except Exception:
+                failed += 1
+                continue
+            refund.cashfree_response = result
+            value = str(result.get('refund_status', '')).upper()
+            if value == 'SUCCESS':
+                refund.status = RestaurantRefund.Status.SUCCESS
+                RestaurantOrder.objects.filter(pk=refund.order_id).update(
+                    payment_status=RestaurantOrder.PaymentStatus.REFUNDED)
+            elif value in {'FAILED', 'CANCELLED'}:
+                refund.status = RestaurantRefund.Status.FAILED
+            refund.save(update_fields=['cashfree_response', 'status', 'updated_at'])
+            synced += 1
+        return Response({'processed': processed, 'failed': failed, 'synced': synced})
 
 
 class PartnerBaseMixin:

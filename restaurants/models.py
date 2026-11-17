@@ -9,6 +9,7 @@ from django.db import models
 from django.utils import timezone
 
 from .utils import haversine_km
+from .fields import EncryptedTextField
 
 
 def generate_delivery_otp():
@@ -105,6 +106,77 @@ class Restaurant(models.Model):
         extra = int(round(distance_km * 3)) if distance_km else 0
         low = self.avg_prep_minutes + extra
         return low, low + 5
+
+
+class RestaurantVendor(models.Model):
+    """Cashfree Easy Split beneficiary and the bank details used to onboard it."""
+    restaurant = models.OneToOneField(Restaurant, on_delete=models.CASCADE, related_name='vendor')
+    cashfree_vendor_id = models.CharField(max_length=50, unique=True, blank=True)
+    bank_account_number = EncryptedTextField()
+    ifsc_code = models.CharField(max_length=11)
+    account_holder_name = models.CharField(max_length=150)
+    pan = EncryptedTextField()
+    business_type = models.CharField(max_length=40)
+    gstin = EncryptedTextField(blank=True, default='')
+    verification_status = models.CharField(max_length=40, default='NOT_SUBMITTED')
+    settlement_status = models.CharField(max_length=40, default='UNKNOWN')
+    last_cashfree_response = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.restaurant.name} vendor'
+
+
+class VendorCommission(models.Model):
+    restaurant = models.ForeignKey(Restaurant, on_delete=models.CASCADE, related_name='commissions')
+    commission_percentage = models.DecimalField(max_digits=5, decimal_places=2,
+        validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('100'))])
+    effective_from = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-effective_from']
+        get_latest_by = 'effective_from'
+
+
+class PaymentSplit(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        PROCESSING = 'processing', 'Processing'
+        SUBMITTED = 'submitted', 'Submitted to Cashfree'
+        SETTLED = 'settled', 'Settled'
+        FAILED = 'failed', 'Failed'
+        NOT_APPLICABLE = 'not_applicable', 'Not applicable'
+
+    order = models.OneToOneField('RestaurantOrder', on_delete=models.PROTECT, related_name='payment_split')
+    vendor = models.ForeignKey(RestaurantVendor, on_delete=models.PROTECT, related_name='payment_splits')
+    gross_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    platform_commission = models.DecimalField(max_digits=10, decimal_places=2)
+    vendor_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    commission_percentage = models.DecimalField(max_digits=5, decimal_places=2)
+    cashfree_split_status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    settlement_id = models.CharField(max_length=100, blank=True)
+    cashfree_response = models.JSONField(default=dict, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class RestaurantRefund(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        PROCESSING = 'processing', 'Processing'
+        SUBMITTED = 'submitted', 'Submitted to Cashfree'
+        SUCCESS = 'success', 'Refunded'
+        FAILED = 'failed', 'Failed'
+
+    order = models.OneToOneField('RestaurantOrder', on_delete=models.PROTECT, related_name='marketplace_refund')
+    refund_id = models.CharField(max_length=50, unique=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    cashfree_refund_id = models.CharField(max_length=100, blank=True)
+    cashfree_response = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class MenuCategory(models.Model):

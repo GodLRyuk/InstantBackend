@@ -20,6 +20,10 @@ urlpatterns = [
     path('cuisines/', views.CuisineListView.as_view(), name='restaurant-cuisines'),
     path('delivery-charge/', views.DeliveryChargeView.as_view(), name='restaurant-delivery-charge'),
     path('partner/onboard/', views.PartnerOnboardView.as_view(), name='partner-onboard'),
+    path('partner/vendor/', views.PartnerVendorView.as_view(), name='partner-vendor'),
+    path('admin/payment-splits/process/', views.ProcessPaymentSplitsView.as_view(), name='process-restaurant-payment-splits'),
+    path('admin/payment-splits/sync/', views.SyncPaymentSplitsView.as_view(), name='sync-restaurant-payment-splits'),
+    path('admin/refunds/process/', views.ProcessRestaurantRefundsView.as_view(), name='process-restaurant-refunds'),
     path('driver/orders/', views.RestaurantDriverOrdersView.as_view(), name='restaurant-driver-orders'),
     path(
         'driver/orders/<int:order_id>/',

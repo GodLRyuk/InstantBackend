@@ -1,4 +1,5 @@
 import logging
+from django.utils import timezone
 
 from django.db import transaction
 from django.http import HttpResponse
@@ -29,9 +30,14 @@ class CashfreeWebhookView(APIView):
             return HttpResponse(status=400)
         try:
             payload = cashfree.parse_webhook(raw_body)
-            provider_order_id = payload['data']['order']['order_id']
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, TypeError):
             return HttpResponse(status=400)
+        try:
+            provider_order_id = payload['data']['order']['order_id']
+        except (KeyError, TypeError):
+            # Refund and Easy Split settlement notifications are reconciled by
+            # the dedicated Cashfree sync worker below; acknowledge valid events.
+            return HttpResponse(status=200)
 
         # Query Cashfree directly before marking an order paid. A webhook alone
         # is an authenticated notification, but the API confirms state and amount.
@@ -89,6 +95,10 @@ class CashfreeWebhookView(APIView):
                         from restaurants.services import notify_restaurant_owner_order_placed
                         notify_restaurant_owner_order_placed(restaurant_order)
                     restaurant_order.save()
+                split = getattr(restaurant_order, 'payment_split', None)
+                if split and not split.paid_at:
+                    split.paid_at = timezone.now()
+                    split.save(update_fields=['paid_at', 'updated_at'])
                 return HttpResponse(status=200)
         # Unknown IDs are acknowledged to avoid pointless webhook retries.
         return HttpResponse(status=200)
