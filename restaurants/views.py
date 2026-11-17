@@ -411,8 +411,14 @@ class AdminRestaurantVendorView(APIView):
                     pan=pan, business_type=business_type, gstin=gstin,
                 )
             except Exception as exc:
+                provider_error = services.cashfree.safe_error_details(
+                    exc, sensitive_values=(account, pan, gstin)
+                )
                 return Response(
-                    {'detail': 'Vendor details were saved, but Cashfree registration failed. Retry this request.'},
+                    {
+                        'detail': 'Vendor details were saved, but Cashfree registration failed. Retry this request after resolving the provider error.',
+                        'cashfree_error': provider_error,
+                    },
                     status=http.HTTP_502_BAD_GATEWAY,
                 )
             vendor.cashfree_vendor_id = vendor_id

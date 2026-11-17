@@ -129,12 +129,38 @@ def _request_idempotency_headers(key):
     return {'x-idempotency-key': str(uuid.uuid5(uuid.NAMESPACE_URL, key)), 'x-request-id': str(uuid.uuid4())}
 
 
+def safe_error_details(exc, *, sensitive_values=()):
+    """Return only Cashfree's non-sensitive error identifiers for API responses."""
+    response = getattr(exc, 'response', None)
+    if response is None:
+        return {'code': 'cashfree_unavailable', 'message': 'Cashfree could not be reached.'}
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    details = {}
+    for key in ('code', 'type', 'message'):
+        if payload.get(key) is None:
+            continue
+        value = str(payload[key])[:300]
+        for sensitive_value in sensitive_values:
+            if sensitive_value:
+                value = value.replace(str(sensitive_value), '[redacted]')
+        details[key] = value
+    if not details:
+        details = {'code': 'cashfree_request_failed',
+                   'message': f'Cashfree returned HTTP {response.status_code}.'}
+    return details
+
+
 def create_vendor(*, vendor_id, name, email, phone, account_number, account_holder, ifsc,
                  pan, business_type, gstin=''):
     """Create a Cashfree Easy Split vendor (requires Easy Split enabled on merchant)."""
     body = {
         'vendor_id': vendor_id, 'status': 'ACTIVE', 'name': name[:100],
-        'email': email, 'phone': ''.join(ch for ch in str(phone) if ch.isdigit())[-12:],
+        'email': email, 'phone': int(''.join(ch for ch in str(phone) if ch.isdigit())[-12:]),
         'verify_account': True, 'dashboard_access': False, 'schedule_option': 1,
         'bank': {'account_number': int(account_number), 'account_holder': account_holder,
                  'ifsc': ifsc.upper()},
@@ -143,8 +169,14 @@ def create_vendor(*, vendor_id, name, email, phone, account_number, account_hold
             'pan': pan.upper(), **({'gst': gstin.upper()} if gstin else {}),
         },
     }
+    # Reuse the key for network retries of identical details, but generate a
+    # new key if staff corrects details after a Cashfree validation failure.
+    request_fingerprint = hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(',', ':')).encode()
+    ).hexdigest()
     response = requests.post(
-        f'{_base_url()}/easy-split/vendors', headers={**_headers(), **_request_idempotency_headers(f'vendor:{vendor_id}')},
+        f'{_base_url()}/easy-split/vendors',
+        headers={**_headers(), **_request_idempotency_headers(f'vendor:{vendor_id}:{request_fingerprint}')},
         json=body, timeout=20,
     )
     if not response.ok:
