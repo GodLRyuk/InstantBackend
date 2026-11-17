@@ -9,10 +9,10 @@ from django.db import transaction
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
-from .utils.email_utils import send_otp_email
 import random
-from django.utils import timezone
-from datetime import timedelta
+import re
+import firebase_admin
+from firebase_admin import auth as firebase_auth
 from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
 from django.core.mail import send_mail
@@ -27,6 +27,15 @@ from accounts.login_security import (
 
 
 User = get_user_model()
+
+
+def _phone_identifier(value):
+    digits = re.sub(r"\D", "", str(value or ""))
+    if len(digits) == 10:
+        return "91" + digits
+    if len(digits) == 11 and digits.startswith("0"):
+        return "91" + digits[1:]
+    return digits
 
 
 def _begin_login_attempt(request, identifier):
@@ -105,6 +114,12 @@ class CustomerLoginAPIView(APIView):
 
         if user.role != "CUSTOMER":
             return Response({"error": "Not a customer account"}, status=403)
+
+        if not user.is_verified:
+            return Response(
+                {"error": "Verify your phone number before logging in.", "code": "phone_not_verified"},
+                status=403,
+            )
 
         refresh = RefreshToken.for_user(user)
 
@@ -198,27 +213,14 @@ class RegisterAPIView(APIView):
             user.profile_image = profile_image
             user.save()
 
-        # 🔐 GENERATE OTP
-        otp = str(random.randint(100000, 999999))
-
-        user.otp = otp
-        user.otp_created_at = timezone.now()
+        # Keep the account pending until the SMS OTP is verified.
         user.is_verified = False
-        user.otp_attempts = 0
         user.save()
 
-        # 📧 SEND EMAIL OTP
-        try:
-            send_otp_email(user.email, otp)
-        except Exception as e:
-            return Response({
-                "error": "User created but OTP email failed",
-                "details": str(e)
-            }, status=500)
-
         return Response({
-            "message": "OTP sent to your email",
-            "email": user.email
+            "message": "Registration created. Verify your phone number to continue.",
+            "email": user.email,
+            "phone": user.phone,
         }, status=status.HTTP_201_CREATED)
 
 class UserProfileAPIView(APIView):
@@ -355,26 +357,50 @@ class VerifyOTPAPIView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        otp = request.data.get("otp")
         otp_type = request.data.get("type")
 
         if otp_type == "register":
             email = request.data.get("email")
+            id_token = request.data.get("firebase_id_token")
+            if not email or not id_token:
+                return Response({"error": "Email and Firebase ID token are required"}, status=400)
 
-            cached_otp = cache.get(f"otp:register:{email}")
+            try:
+                user = User.objects.get(email__iexact=email, role="CUSTOMER")
+            except User.DoesNotExist:
+                return Response({"error": "Registration not found"}, status=404)
 
-            if not cached_otp:
-                return Response({"error": "OTP expired"}, status=400)
+            if user.is_verified:
+                return Response({"message": "Phone number already verified"}, status=200)
+            try:
+                from orders.utils import get_firebase_app
 
-            if str(cached_otp) != str(otp):
-                return Response({"error": "Invalid OTP"}, status=400)
+                get_firebase_app()
+            except Exception:
+                return Response({"error": "Firebase phone verification is not configured on the server"}, status=503)
+            try:
+                firebase_user = firebase_auth.verify_id_token(
+                    id_token,
+                    app=firebase_admin.get_app(),
+                )
+            except Exception:
+                return Response({"error": "Invalid or expired Firebase verification token"}, status=400)
 
-            return Response({"message": "Register OTP verified"}, status=200)
+            verified_phone = _phone_identifier(firebase_user.get("phone_number"))
+            registered_phone = _phone_identifier(user.phone)
+            if not verified_phone or verified_phone != registered_phone:
+                return Response({"error": "Verified phone number does not match this registration"}, status=400)
+
+            user.is_verified = True
+            user.save(update_fields=["is_verified"])
+            return Response({"message": "Registration phone verified"}, status=200)
 
         elif otp_type == "email_change":
             if not request.user.is_authenticated:
                 return Response({"error": "Authentication credentials were not provided."}, status=401)
             user = request.user
+
+            otp = request.data.get("otp")
 
             cached_otp = cache.get(f"otp:email_change:{user.id}")
 
@@ -387,34 +413,6 @@ class VerifyOTPAPIView(APIView):
             return Response({"message": "OTP verified successfully"}, status=200)
 
         return Response({"error": "Invalid OTP type"}, status=400)
-class ResendOTPAPIView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        email = request.data.get("email")
-
-        if not email:
-            return Response({"error": "Email required"}, status=400)
-
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
-
-        # 🔥 generate new OTP
-        otp = str(random.randint(100000, 999999))
-
-        user.otp = otp
-        user.otp_created_at = timezone.now()
-        user.otp_attempts = 0
-        user.save()
-
-        # 📧 send email (if you already implemented)
-        # send_otp_email(user.email, otp)
-
-        print(f"Resent OTP: {otp}")
-
-        return Response({"message": "OTP resent successfully"}, status=200)
 class UpdateProfileAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
