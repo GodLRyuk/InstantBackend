@@ -33,9 +33,16 @@ by the existing client application. The webhook endpoint is
 
 Restaurant order checkout still uses the existing Cashfree PG order flow. Marketplace settlement is an additional Easy Split flow and requires Easy Split to be enabled for the same Cashfree merchant account in both sandbox and production.
 
-## Owner onboarding
+## Angular admin vendor onboarding
 
-An approved restaurant owner submits bank details and business KYC (`account_number`, `ifsc_code`, `account_holder_name`, `pan`, `business_type`, optional `gstin`) to `POST /api/restaurants/partner/vendor/`. Account number and KYC identifiers are encrypted in the database using Django's `SECRET_KEY`; they are not returned by the API. Cashfree performs beneficiary verification. Owners can read the verification state with `GET` on the same endpoint. Bank/KYC details cannot currently be changed after the Cashfree vendor is created; support must coordinate changes to prevent a local/Cashfree mismatch.
+Staff enter bank details and business KYC (`account_number`, `ifsc_code`, `account_holder_name`, `pan`, `business_type`, optional `gstin`) in the Angular admin panel. Submit those details through the staff-only API:
+
+```text
+GET  /api/restaurants/admin/vendors/
+POST /api/restaurants/admin/vendors/
+```
+
+The POST body contains `restaurant_id`, `account_number`, `ifsc_code`, `account_holder_name`, `pan`, `business_type`, and optional `gstin`. A successful response includes `id`, `restaurant_id`, `restaurant_name`, `cashfree_vendor_id`, `verification_status`, `settlement_status`, `bank_account_last4`, `ifsc_code`, and `updated_at`. GET returns a list with those same fields. Both endpoints require an authenticated Django staff account. A Cashfree failure returns HTTP 502; the encrypted details are retained for retry. Account number and KYC identifiers are encrypted in the database using Django's `SECRET_KEY` and are never returned by the API. The restaurant must have an email and phone number before staff registers it. Vendor bank/KYC entry is not available in Django admin.
 
 Configure commission percentages in Django admin under **Vendor commissions**. The applicable latest commission effective at order creation is snapshotted into the order split. If no commission is configured, the platform commission is zero.
 

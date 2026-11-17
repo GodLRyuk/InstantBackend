@@ -3,6 +3,7 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from decimal import Decimal
 import hmac
+import re
 from django.utils import timezone
 from rest_framework import generics, mixins, status as http, viewsets
 from rest_framework.decorators import action
@@ -332,39 +333,49 @@ class PartnerOnboardView(APIView):
         return Response(s.data, status=http.HTTP_201_CREATED)
 
 
-class PartnerVendorView(APIView):
-    """Owner-managed Easy Split beneficiary onboarding; never returns full bank details."""
-    permission_classes = [IsAuthenticated]
+class AdminRestaurantVendorView(APIView):
+    """Staff API used by the Angular admin panel to onboard Cashfree vendors."""
+    permission_classes = [IsAuthenticated, IsStaffUser]
 
-    def get(self, request):
-        restaurant = partner_restaurant(request)
-        vendor = getattr(restaurant, 'vendor', None)
-        if not vendor:
-            return Response({'status': 'NOT_SUBMITTED'})
-        return Response({
+    @staticmethod
+    def _serialize(vendor):
+        return {
+            'id': vendor.pk,
+            'restaurant_id': vendor.restaurant_id,
+            'restaurant_name': vendor.restaurant.name,
             'cashfree_vendor_id': vendor.cashfree_vendor_id,
             'verification_status': vendor.verification_status,
             'settlement_status': vendor.settlement_status,
             'bank_account_last4': vendor.bank_account_number[-4:],
             'ifsc_code': vendor.ifsc_code,
-        })
+            'updated_at': vendor.updated_at,
+        }
+
+    def get(self, request):
+        vendors = RestaurantVendor.objects.select_related('restaurant').order_by('restaurant__name')
+        return Response([self._serialize(vendor) for vendor in vendors])
 
     def post(self, request):
-        restaurant = partner_restaurant(request)
-        if restaurant.status != Restaurant.Status.APPROVED:
-            raise ValidationError({'detail': 'Restaurant approval is required before payment onboarding.'})
         data = request.data
+        restaurant_id = data.get('restaurant_id')
+        try:
+            restaurant = Restaurant.objects.select_related('owner').get(pk=restaurant_id)
+        except (Restaurant.DoesNotExist, TypeError, ValueError):
+            raise ValidationError({'restaurant_id': 'Select a valid restaurant.'})
+        if restaurant.status != Restaurant.Status.APPROVED:
+            raise ValidationError({'restaurant_id': 'Restaurant approval is required before vendor onboarding.'})
+
         required = ('account_number', 'ifsc_code', 'account_holder_name', 'pan', 'business_type')
         missing = [key for key in required if not str(data.get(key, '')).strip()]
         if missing:
             raise ValidationError({key: 'This field is required.' for key in missing})
         account = str(data['account_number']).strip()
         if not account.isdigit() or not 6 <= len(account) <= 18:
-            raise ValidationError({'account_number': 'Enter a valid bank account number.'})
+            raise ValidationError({'account_number': 'Enter a bank account number of 6–18 digits.'})
         ifsc = str(data['ifsc_code']).strip().upper()
-        import re
         if not re.fullmatch(r'[A-Z]{4}0[A-Z0-9]{6}', ifsc):
             raise ValidationError({'ifsc_code': 'Enter a valid IFSC code.'})
+        holder = str(data['account_holder_name']).strip()
         pan = str(data['pan']).strip().upper()
         if not re.fullmatch(r'[A-Z]{5}[0-9]{4}[A-Z]', pan):
             raise ValidationError({'pan': 'Enter a valid PAN.'})
@@ -374,38 +385,42 @@ class PartnerVendorView(APIView):
         gstin = str(data.get('gstin', '')).strip().upper()
         if gstin and not re.fullmatch(r'[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', gstin):
             raise ValidationError({'gstin': 'Enter a valid GSTIN.'})
-        email = restaurant.email or request.user.email
-        phone = restaurant.phone or getattr(request.user, 'phone', '')
+        email = restaurant.email or restaurant.owner.email
+        phone = restaurant.phone or getattr(restaurant.owner, 'phone', '')
         if not email or not phone:
             raise ValidationError({'detail': 'Restaurant email and phone are required for Cashfree onboarding.'})
-        vendor, _ = RestaurantVendor.objects.get_or_create(
-            restaurant=restaurant,
-            defaults={'bank_account_number': account, 'ifsc_code': ifsc,
-                      'account_holder_name': str(data['account_holder_name']).strip(),
-                      'pan': pan, 'business_type': business_type, 'gstin': gstin},
-        )
-        if vendor.cashfree_vendor_id and (
-            vendor.bank_account_number != account or vendor.ifsc_code != ifsc
-            or vendor.account_holder_name != str(data['account_holder_name']).strip()
-            or vendor.pan != pan or vendor.business_type != business_type or vendor.gstin != gstin
-        ):
-            raise ValidationError({'detail': 'Bank details cannot be changed after vendor registration. Contact support.'})
-        if not vendor.cashfree_vendor_id:
+
+        with transaction.atomic():
+            vendor = RestaurantVendor.objects.select_for_update().filter(restaurant=restaurant).first()
+            if vendor and vendor.cashfree_vendor_id:
+                raise ValidationError({'detail': 'This restaurant already has a Cashfree vendor.'})
+            if vendor is None:
+                vendor = RestaurantVendor(restaurant=restaurant)
+            vendor.bank_account_number = account
+            vendor.ifsc_code = ifsc
+            vendor.account_holder_name = holder
+            vendor.pan = pan
+            vendor.business_type = business_type
+            vendor.gstin = gstin
+            vendor.save()
             vendor_id = f'restaurant_{restaurant.pk}'
             try:
-                response = services.cashfree.create_vendor(
-                    vendor_id=vendor_id, name=restaurant.name,
-                    email=email, phone=phone, account_number=account,
-                    account_holder=vendor.account_holder_name, ifsc=ifsc,
+                result = services.cashfree.create_vendor(
+                    vendor_id=vendor_id, name=restaurant.name, email=email, phone=phone,
+                    account_number=account, account_holder=holder, ifsc=ifsc,
                     pan=pan, business_type=business_type, gstin=gstin,
                 )
             except Exception as exc:
-                raise ValidationError({'detail': 'Cashfree vendor onboarding failed. Please retry later.'}) from exc
+                return Response(
+                    {'detail': 'Vendor details were saved, but Cashfree registration failed. Retry this request.'},
+                    status=http.HTTP_502_BAD_GATEWAY,
+                )
             vendor.cashfree_vendor_id = vendor_id
-            vendor.verification_status = response.get('status', 'PENDING')
-            vendor.last_cashfree_response = response
-            vendor.save()
-        return self.get(request)
+            vendor.verification_status = result.get('status', 'PENDING')
+            vendor.last_cashfree_response = result
+            vendor.save(update_fields=['cashfree_vendor_id', 'verification_status',
+                                       'last_cashfree_response', 'updated_at'])
+        return Response(self._serialize(vendor), status=http.HTTP_201_CREATED)
 
 
 class ProcessPaymentSplitsView(APIView):
