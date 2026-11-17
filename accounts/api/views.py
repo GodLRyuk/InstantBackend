@@ -351,7 +351,8 @@ class AccountDeletionAPIView(APIView):
 
 
 class VerifyOTPAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    # Registration verification happens before the user has an access token.
+    permission_classes = [AllowAny]
 
     def post(self, request):
         otp = request.data.get("otp")
@@ -371,6 +372,8 @@ class VerifyOTPAPIView(APIView):
             return Response({"message": "Register OTP verified"}, status=200)
 
         elif otp_type == "email_change":
+            if not request.user.is_authenticated:
+                return Response({"error": "Authentication credentials were not provided."}, status=401)
             user = request.user
 
             cached_otp = cache.get(f"otp:email_change:{user.id}")
