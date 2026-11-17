@@ -365,7 +365,7 @@ class AdminRestaurantVendorView(APIView):
         if restaurant.status != Restaurant.Status.APPROVED:
             raise ValidationError({'restaurant_id': 'Restaurant approval is required before vendor onboarding.'})
 
-        required = ('account_number', 'ifsc_code', 'account_holder_name', 'pan', 'business_type')
+        required = ('account_number', 'ifsc_code', 'account_holder_name', 'pan')
         missing = [key for key in required if not str(data.get(key, '')).strip()]
         if missing:
             raise ValidationError({key: 'This field is required.' for key in missing})
@@ -379,9 +379,9 @@ class AdminRestaurantVendorView(APIView):
         pan = str(data['pan']).strip().upper()
         if not re.fullmatch(r'[A-Z]{5}[0-9]{4}[A-Z]', pan):
             raise ValidationError({'pan': 'Enter a valid PAN.'})
-        business_type = str(data['business_type']).strip().upper()
-        if not re.fullmatch(r'[A-Z_]{3,40}', business_type):
-            raise ValidationError({'business_type': 'Use a Cashfree business type such as PROPRIETORSHIP or PRIVATE_LIMITED.'})
+        # This endpoint onboards restaurants, so send Cashfree's accepted
+        # industry category rather than arbitrary restaurant/legal-form text.
+        business_type = 'Food and Beverages'
         gstin = str(data.get('gstin', '')).strip().upper()
         if gstin and not re.fullmatch(r'[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', gstin):
             raise ValidationError({'gstin': 'Enter a valid GSTIN.'})
@@ -412,7 +412,7 @@ class AdminRestaurantVendorView(APIView):
                 )
             except Exception as exc:
                 provider_error = services.cashfree.safe_error_details(
-                    exc, sensitive_values=(account, pan, gstin)
+                    exc, sensitive_values=(account, pan, gstin, holder, phone)
                 )
                 return Response(
                     {

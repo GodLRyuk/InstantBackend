@@ -144,7 +144,7 @@ def safe_error_details(exc, *, sensitive_values=()):
     for key in ('code', 'type', 'message'):
         if payload.get(key) is None:
             continue
-        value = str(payload[key])[:300]
+        value = str(payload[key])[:1200]
         for sensitive_value in sensitive_values:
             if sensitive_value:
                 value = value.replace(str(sensitive_value), '[redacted]')
