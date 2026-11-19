@@ -22,7 +22,7 @@ webhook URL in the corresponding Cashfree dashboard environment.
 
 Grocery checkout at `POST /api/orders/create/` reserves inventory and returns
 a Cashfree payment session with `payment_expires_at`. The session expires after
-20 minutes. The backend creates the order after verifying the payment amount
+5 minutes. The backend creates the order after verifying the payment amount
 and currency through the signed webhook, the authenticated
 `POST /api/verify-payment/` endpoint, or the reconciliation worker.
 
