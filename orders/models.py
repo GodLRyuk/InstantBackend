@@ -1,11 +1,12 @@
-from django.db import models
+from django.db import models, transaction
+from django.db.models import F
 from django.utils import timezone
 import secrets
 from products.models import Product
 from accounts.models import User
 from promotions.models import Coupon
 from addresses.models import Address
-from stock.models import StockBatch
+from stock.models import Inventory, StockBatch
 
 
 def generate_delivery_otp():
@@ -113,8 +114,7 @@ class Order(models.Model):
         self.save()
 
     def mark_failed(self):
-        self.payment_status = "FAILED"
-        self.save()
+        return self.mark_cancelled(payment_failed=True)
 
     def mark_pending(self):
         self.payment_status = "PENDING"
@@ -130,14 +130,36 @@ class Order(models.Model):
         self.order_status = "DELIVERED"
         self.save()
 
-    def mark_cancelled(self):
-        """Cancel order and restore inventory for all items"""
-        self.order_status = "CANCELLED"
-        for item in self.items.all():
-            inventory = item.product.inventory
-            inventory.total_stock += item.quantity
-            inventory.save()
-        self.save()
+    @transaction.atomic
+    def mark_cancelled(self, *, payment_failed=False):
+        order = Order.objects.select_for_update().get(pk=self.pk)
+        if order.order_status in {"CANCELLED", "SHIPPED", "DELIVERED"} or order.payment_status == "PAID":
+            return False
+
+        for item in order.items.order_by("product_id", "pk"):
+            Inventory.objects.filter(product_id=item.product_id).update(
+                total_stock=F("total_stock") + item.quantity,
+                updated_at=timezone.now(),
+            )
+            if item.batch_id:
+                StockBatch.objects.filter(pk=item.batch_id).update(
+                    quantity=F("quantity") + item.quantity,
+                )
+
+        order.order_status = "CANCELLED"
+        if payment_failed:
+            order.payment_status = "FAILED"
+        order.save(update_fields=["order_status", "payment_status", "updated_at"])
+        self.order_status = order.order_status
+        self.payment_status = order.payment_status
+        return True
+
+    def can_fulfill(self):
+        return (
+            self.order_status != "CANCELLED"
+            and self.payment_status != "FAILED"
+            and (self.payment_method in {"COD", "UPI"} or self.payment_status == "PAID")
+        )
 
     # ---------------------- COUPON / DISCOUNT ----------------------
 
@@ -158,18 +180,27 @@ class CashfreeCheckoutIntent(models.Model):
         PENDING = "PENDING", "Pending"
         PAID = "PAID", "Paid"
         FAILED = "FAILED", "Failed"
+        REFUND_PENDING = "REFUND_PENDING", "Refund pending"
+        REFUNDED = "REFUNDED", "Refunded"
+        REFUND_FAILED = "REFUND_FAILED", "Refund failed"
 
     user = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
         related_name="cashfree_checkout_intents",
     )
     cashfree_order_id = models.CharField(max_length=255, unique=True)
-    payment_session_id = models.TextField()
+    payment_session_id = models.TextField(blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    reconcile_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    refund_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    refund_attempt = models.PositiveIntegerField(default=1)
+    refund_started = models.BooleanField(default=False)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     checkout_data = models.JSONField()
     status = models.CharField(
-        max_length=10,
+        max_length=16,
         choices=Status.choices,
         default=Status.PENDING,
     )
@@ -185,6 +216,21 @@ class CashfreeCheckoutIntent(models.Model):
 
     def __str__(self):
         return f"Cashfree checkout {self.cashfree_order_id} ({self.status})"
+
+
+class CheckoutStockReservation(models.Model):
+    checkout = models.ForeignKey(
+        CashfreeCheckoutIntent, on_delete=models.PROTECT, related_name="reservations",
+    )
+    inventory = models.ForeignKey(Inventory, on_delete=models.PROTECT)
+    quantity = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["checkout", "inventory"], name="unique_checkout_inventory_reservation",
+            ),
+        ]
 
 
 class OrderItem(models.Model):

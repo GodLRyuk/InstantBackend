@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
@@ -41,11 +42,15 @@ class SubmitOrderView(APIView):
     """
     permission_classes = [permissions.IsAuthenticated, IsPickupBoy]
 
+    @transaction.atomic
     def post(self, request, order_id):
         try:
-            order = Order.objects.select_related(None).get(id=order_id)
+            order = Order.objects.select_for_update().get(id=order_id)
         except Order.DoesNotExist:
             return Response({"detail": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not order.can_fulfill() or order.order_status in {"SHIPPED", "DELIVERED"}:
+            return Response({"detail": "Order is not eligible for packing."}, status=409)
 
         items = OrderItem.objects.filter(order=order)
         for item in items:

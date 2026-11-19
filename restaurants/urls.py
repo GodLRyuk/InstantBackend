@@ -1,7 +1,7 @@
 from django.urls import path
 from rest_framework.routers import SimpleRouter
 
-from . import views
+from . import payment_admin, views
 
 router = SimpleRouter()
 router.register(r'partner/categories', views.PartnerCategoryViewSet, basename='partner-category')
@@ -20,6 +20,9 @@ urlpatterns = [
     path('cuisines/', views.CuisineListView.as_view(), name='restaurant-cuisines'),
     path('delivery-charge/', views.DeliveryChargeView.as_view(), name='restaurant-delivery-charge'),
     path('partner/onboard/', views.PartnerOnboardView.as_view(), name='partner-onboard'),
+    path('admin/commissions/', payment_admin.CommissionsView.as_view(), name='admin-commissions'),
+    path('admin/payment-splits/', payment_admin.SplitsView.as_view(), name='admin-payment-splits'),
+    path('admin/refunds/', payment_admin.RefundsView.as_view(), name='admin-restaurant-refunds'),
     path('admin/vendors/', views.AdminRestaurantVendorView.as_view(), name='admin-restaurant-vendors'),
     path('admin/payment-splits/process/', views.ProcessPaymentSplitsView.as_view(), name='process-restaurant-payment-splits'),
     path('admin/payment-splits/sync/', views.SyncPaymentSplitsView.as_view(), name='sync-restaurant-payment-splits'),

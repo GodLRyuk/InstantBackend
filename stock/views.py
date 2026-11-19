@@ -2,9 +2,10 @@ from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import StockAdjustment, StockBatch
+from .models import Inventory, StockAdjustment, StockBatch
 from .serializers import StockAdjustmentSerializer, StockBatchSerializer
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAdminUser
+from rest_framework.exceptions import ValidationError
 from rest_framework.generics import ListCreateAPIView
 
 
@@ -21,7 +22,7 @@ class StockListAPIView(APIView):
 
 class StockAdjustmentAPIView(ListCreateAPIView):
     serializer_class = StockAdjustmentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminUser]
 
     def get_queryset(self):
         qs = StockAdjustment.objects.select_related('batch__product','adjusted_by').order_by('-created_at')
@@ -32,16 +33,20 @@ class StockAdjustmentAPIView(ListCreateAPIView):
 
     @transaction.atomic
     def perform_create(self, serializer):
-        adj = serializer.save(adjusted_by=self.request.user)
-        batch = adj.batch
-        inv = batch.product.inventory
+        data = serializer.validated_data
+        inventory = Inventory.objects.select_for_update().get(product_id=data["batch"].product_id)
+        batch = StockBatch.objects.select_for_update().filter(pk=data["batch"].pk).first()
+        if batch is None:
+            raise ValidationError({"batch": "Stock batch no longer exists"})
 
-        if adj.adjust_type == "OUT":
-            batch.quantity -= adj.quantity
-            inv.total_stock -= adj.quantity
-        else:  # IN
-            batch.quantity += adj.quantity
-            inv.total_stock += adj.quantity
+        quantity = data["quantity"]
+        if data["adjust_type"] == "OUT":
+            if quantity > min(batch.quantity, inventory.available_stock()):
+                raise ValidationError({"quantity": "Insufficient available stock"})
+            quantity = -quantity
 
-        batch.save()
-        inv.save()
+        serializer.save(adjusted_by=self.request.user, batch=batch)
+        batch.quantity += quantity
+        batch.save(update_fields=["quantity"])
+        inventory.total_stock += quantity
+        inventory.save(update_fields=["total_stock", "updated_at"])

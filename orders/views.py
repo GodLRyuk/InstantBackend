@@ -26,10 +26,11 @@ from promotions.models import Coupon, CouponUsage
 from datetime import date, timedelta, timezone              # 👈 add
 from orders.slot_utils import generate_slots      # 👈 add
 from rest_framework.decorators import api_view, permission_classes  # 👈 add
+from django.db import transaction
 from django.db.models import Q
 from orders.payment_fulfillment import (
-    activate_paid_order,
-    finalize_cashfree_checkout,
+    reconcile_unpaid_cashfree_order,
+    sync_cashfree_checkout,
 )
 
 
@@ -110,13 +111,21 @@ class CancelOrderView(APIView):
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
 
-        if order.order_status == "DELIVERED":
-            return Response({"error": "Delivered order cannot be cancelled"}, status=400)
-
         if order.order_status == "CANCELLED":
-            return Response({"error": "Order already cancelled"}, status=400)
-
-        order.mark_cancelled()
+            return Response({"message": "Order already cancelled"})
+        if order.payment_status == "PAID":
+            return Response({"error": "Paid orders require refund handling"}, status=409)
+        if order.cashfree_order_id:
+            try:
+                failed = reconcile_unpaid_cashfree_order(order.cashfree_order_id)
+            except Exception:
+                return Response({"error": "Could not verify checkout with Cashfree"}, status=502)
+            if not failed:
+                return Response({"error": "Cashfree payment must be closed before cancelling this order"}, status=409)
+        elif order.razorpay_order_id and order.payment_status != "FAILED":
+            return Response({"error": "Confirm the legacy payment is closed before cancelling"}, status=409)
+        elif not order.mark_cancelled():
+            return Response({"error": "Order can no longer be cancelled"}, status=409)
 
         return Response({"message": "Order cancelled successfully"})
 
@@ -124,6 +133,7 @@ class CancelOrderView(APIView):
 class UpdateOrderStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, pk):
         user = request.user
         if not (user.is_staff or getattr(user, "role", None) in ["ADMIN", "DELIVERY"]):
@@ -132,9 +142,16 @@ class UpdateOrderStatusView(APIView):
         status_value = request.data.get("status")
 
         try:
-            order = Order.objects.get(id=pk)
+            order = Order.objects.select_for_update().get(id=pk)
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
+
+        if not (user.is_staff or user.role == "ADMIN") and not (
+            DeliveryAssignment.objects.filter(order=order, driver=user).exists()
+        ):
+            return Response({"error": "You are not assigned to this order"}, status=403)
+        if not order.can_fulfill() or order.order_status == "DELIVERED":
+            return Response({"error": "Order is not eligible for fulfillment"}, status=409)
 
         if status_value == "SHIPPED":
             order.mark_shipped()
@@ -189,7 +206,7 @@ class CreateOrderView(CreateAPIView):
                             "order_status": "CONFIRMED",
                             "payment_status": order.payment_status,
                             "total_amount": float(order.total_amount),
-                            "customer_name": order.user.first_name + " " + order.user.middle_name + " " + order.user.last_name,
+                            "customer_name": order.user.get_full_name(),
                             "customer_phone": order.user.phone,
                             "address": order.address_snapshot,
                             "assigned_at": str(assignment.assigned_at),
@@ -228,39 +245,17 @@ class VerifyPaymentView(APIView):
             user=request.user,
         ).first()
         if intent:
-            if intent.order_id:
-                return Response({
-                    "status": "PAID",
-                    "payment_status": "PAID",
-                    "order_id": intent.order_id,
-                })
             try:
-                from payments import cashfree
-                payment = cashfree.success_payment(provider_order_id)
+                intent = sync_cashfree_checkout(intent)
             except Exception:
-                return Response(
-                    {"error": "Could not verify payment with Cashfree"},
-                    status=502,
-                )
-            if (
-                not cashfree.payment_matches(payment, amount=intent.amount)
-            ):
-                return Response({"status": "PENDING", "payment_status": "PENDING"}, status=202)
-            try:
-                order = finalize_cashfree_checkout(intent.pk, payment)
-            except ValueError as exc:
-                return Response({"error": str(exc)}, status=409)
-            if order is None:
-                return Response(
-                    {"status": "PENDING", "payment_status": "PENDING"},
-                    status=202,
-                )
-            activate_paid_order(order)
-            return Response({
-                "status": "PAID",
-                "payment_status": "PAID",
-                "order_id": order.id,
-            })
+                return Response({"error": "Could not verify payment with Cashfree"}, status=502)
+
+            result = {"status": intent.status, "payment_status": intent.status}
+            if intent.order_id:
+                result["order_id"] = intent.order_id
+            return Response(
+                result, status=202 if intent.status in {"PENDING", "REFUND_PENDING"} else 200,
+            )
 
         try:
             order = Order.objects.get(cashfree_order_id=provider_order_id, user=request.user)
@@ -271,12 +266,19 @@ class VerifyPaymentView(APIView):
         try:
             from payments import cashfree
             payment = cashfree.success_payment(provider_order_id)
+            if payment is None and reconcile_unpaid_cashfree_order(provider_order_id):
+                return Response({"status": "FAILED", "payment_status": "FAILED"})
         except Exception:
             return Response({"error": "Could not verify payment with Cashfree"}, status=502)
         if not cashfree.payment_matches(payment, amount=order.total_amount):
             return Response({"status": "PENDING", "payment_status": "PENDING"}, status=202)
-        order.cashfree_payment_id = str(payment.get('cf_payment_id', ''))
-        order.mark_paid()
+        with transaction.atomic():
+            order = Order.objects.select_for_update().get(pk=order.pk)
+            if order.order_status == "CANCELLED" or order.payment_status == "FAILED":
+                return Response({"error": "Payment requires reconciliation for a closed order"}, status=409)
+            if order.payment_status != "PAID":
+                order.cashfree_payment_id = str(payment.get('cf_payment_id', ''))
+                order.mark_paid()
         return Response({"status": "PAID", "payment_status": "PAID"})
 
 
@@ -300,14 +302,21 @@ class AssignDriverView(APIView):
 
 
 class AutoAssignDriverAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request):
         order_id = request.data.get("order_id")
 
         try:
-            order = Order.objects.get(id=order_id)
+            order = Order.objects.select_for_update().get(id=order_id)
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
+
+        if order.user_id != request.user.pk and not request.user.is_staff:
+            return Response({"error": "Permission denied"}, status=403)
+        if not order.can_fulfill() or order.order_status == "DELIVERED":
+            return Response({"error": "Order is not eligible for assignment"}, status=409)
 
         existing = DeliveryAssignment.objects.filter(order=order).first()
         if existing:
@@ -316,7 +325,7 @@ class AutoAssignDriverAPIView(APIView):
                 "order_status": "CONFIRMED",
                 "payment_status": order.payment_status,
                 "total_amount": float(order.total_amount),
-                "customer_name": order.user.first_name+" "+order.user.middle_name+" "+order.user.last_name,
+                "customer_name": order.user.get_full_name(),
                 "customer_phone": order.user.phone,
                 "address": order.address_snapshot,
                 "assigned_at": str(existing.assigned_at),
@@ -343,7 +352,7 @@ class AutoAssignDriverAPIView(APIView):
             "order_status": order.order_status,
             "payment_status": order.payment_status,
             "total_amount": float(order.total_amount),
-            "customer_name": order.user.first_name+" "+order.user.middle_name+" "+order.user.last_name,
+            "customer_name": order.user.get_full_name(),
             "customer_phone": order.user.phone,
             "address": order.address_snapshot,
             "assigned_at": str(assignment.assigned_at),
@@ -371,6 +380,8 @@ class DriverAssignedOrdersAPIView(APIView):
 
         assignments = DeliveryAssignment.objects.filter(
             driver=user
+        ).exclude(order__order_status="CANCELLED").exclude(
+            order__payment_status="FAILED"
         ).select_related("order", "order__user").order_by("-assigned_at")
 
         data = []
@@ -399,6 +410,7 @@ class DriverAssignedOrdersAPIView(APIView):
 class ConfirmPaymentView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, pk):
         user = request.user
 
@@ -412,9 +424,16 @@ class ConfirmPaymentView(APIView):
             )
 
         try:
-            order = Order.objects.get(id=pk)
+            order = Order.objects.select_for_update().get(id=pk)
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
+
+        if not (user.is_staff or getattr(user, "role", None) == "ADMIN") and not (
+            DeliveryAssignment.objects.filter(order=order, driver=user).exists()
+        ):
+            return Response({"error": "You are not assigned to this order"}, status=403)
+        if not order.can_fulfill() or order.payment_method not in {"COD", "UPI"}:
+            return Response({"error": "Order is not eligible for collection"}, status=409)
 
         payment_method = request.data.get("payment_method", "").upper()
         status_value   = request.data.get("status", "").upper()
@@ -450,6 +469,9 @@ class SendDeliveryOtpAPIView(APIView):
             order = Order.objects.get(id=pk)
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
+
+        if order.order_status == "CANCELLED" or order.payment_status == "FAILED":
+            return Response({"error": "Order is closed"}, status=409)
 
         assignment = DeliveryAssignment.objects.filter(
             order=order, driver=user
@@ -497,6 +519,7 @@ class SendDeliveryOtpAPIView(APIView):
 class VerifyDeliveryOtpAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request, pk):
         user = request.user
 
@@ -504,9 +527,12 @@ class VerifyDeliveryOtpAPIView(APIView):
             return Response({"error": "Permission denied"}, status=403)
 
         try:
-            order = Order.objects.get(id=pk)
+            order = Order.objects.select_for_update().get(id=pk)
         except Order.DoesNotExist:
             return Response({"error": "Order not found"}, status=404)
+
+        if order.order_status == "CANCELLED" or order.payment_status == "FAILED":
+            return Response({"error": "Order is closed"}, status=409)
 
         assignment = DeliveryAssignment.objects.filter(
             order=order, driver=user
