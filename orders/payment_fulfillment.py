@@ -34,7 +34,7 @@ class CheckoutInitializationError(ValueError):
 
 
 Status = CashfreeCheckoutIntent.Status
-CHECKOUT_TTL = timedelta(minutes=20)
+CHECKOUT_TTL = timedelta(minutes=5)
 RECONCILE_DELAY = timedelta(minutes=1)
 LATE_PAYMENT_WINDOW = timedelta(hours=24)
 
