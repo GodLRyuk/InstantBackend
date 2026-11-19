@@ -1,10 +1,8 @@
-from PIL.Image import item
 from rest_framework import serializers
 
 from orders.location_utils import validate_user_location, calculate_delivery_fee, ALLOWED_PINCODES  # ✅ CHANGED
 from stock.models import StockBatch
 from .models import (
-    CashfreeCheckoutIntent,
     CashRemittance,
     CashRemittanceItem,
     Order,
@@ -16,15 +14,15 @@ from promotions.models import Coupon, CouponUsage, DeliveryPass
 from promotions.models import DeliverySettings
 from addresses.models import Address
 from datetime import date as date_type
-from django.conf import settings as django_settings
 from decimal import Decimal
-import logging
 
-from payments import cashfree
+from orders.payment_fulfillment import (
+    CheckoutInitializationError,
+    CheckoutUnavailable,
+    open_cashfree_checkout,
+)
 from accounts.models import User
 from stock.models import Inventory, StoreSale, StoreSaleItem
-
-logger = logging.getLogger(__name__)
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -110,7 +108,7 @@ class CreateStoreSaleSerializer(serializers.Serializer):
         customer = validated_data.get("customer")
         total_amount = Decimal("0.00")
         sale_items = []
-        for item in validated_data["items"]:
+        for item in sorted(validated_data["items"], key=lambda item: item["product"].pk):
             product = Product.objects.select_for_update().get(pk=item["product"].pk)
             quantity = item["quantity"]
             try:
@@ -183,8 +181,8 @@ class StoreSaleSerializer(serializers.ModelSerializer):
 
 
 class CreateOrderItemSerializer(serializers.Serializer):
-    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
-    quantity = serializers.IntegerField()
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.filter(is_active=True))
+    quantity = serializers.IntegerField(min_value=1)
 
 
 class CreateOrderSerializer(serializers.Serializer):
@@ -204,15 +202,18 @@ class CreateOrderSerializer(serializers.Serializer):
         if not items:
             raise serializers.ValidationError("Order must contain at least one item")
 
-        validated_items = []
+        items_by_product = {}
         for item in items:
-            product = item['product']
-            inventory = product.inventory
-            if item['quantity'] > inventory.available_stock():
-                raise serializers.ValidationError(f"Insufficient stock for {product.name}")
-            validated_items.append({"product": product, "quantity": item['quantity']})
+            product = item["product"]
+            line = items_by_product.setdefault(product.pk, {"product": product, "quantity": 0})
+            line["quantity"] += item["quantity"]
 
-        data['items'] = validated_items
+        for item in items_by_product.values():
+            product = item["product"]
+            if item["quantity"] > product.inventory.available_stock():
+                raise serializers.ValidationError(f"Insufficient stock for {product.name}")
+
+        data["items"] = list(items_by_product.values())
 
         if data.get("delivery_type") == "SCHEDULED":
             if not data.get("scheduled_date"):
@@ -226,8 +227,13 @@ class CreateOrderSerializer(serializers.Serializer):
 
         return data
 
-    @transaction.atomic
     def create(self, validated_data):
+        if validated_data["payment_method"].upper() in {"RAZORPAY", "CASHFREE", "ONLINE"}:
+            return self.create_checkout(validated_data)
+        with transaction.atomic():
+            return self.create_checkout(validated_data)
+
+    def create_checkout(self, validated_data):
         user = self.context['request'].user
         items_data = validated_data['items']
         coupon_code = validated_data.get('coupon_code', '').strip().upper()
@@ -330,7 +336,7 @@ class CreateOrderSerializer(serializers.Serializer):
                 already_used = CouponUsage.objects.filter(coupon=applied_coupon, user=user).exists()
                 if already_used:
                     raise serializers.ValidationError("You have already used this coupon.")
-            discount_amount = applied_coupon.calculate_discount(subtotal)
+            discount_amount = min(subtotal, applied_coupon.calculate_discount(subtotal))
 
         total_amount = subtotal - discount_amount + delivery_fee
 
@@ -364,33 +370,17 @@ class CreateOrderSerializer(serializers.Serializer):
                 "pass_used": bool(pass_active and delivery_fee == 0),
             }
             try:
-                cf_order = cashfree.create_order(
-                    amount=total_amount,
-                    currency="INR",
-                    customer_id=user.pk,
-                    customer_phone=user.phone,
-                    customer_email=user.email,
-                    order_note="Grocery checkout",
-                    return_url=django_settings.CASHFREE_RETURN_URL,
-                    notify_url=django_settings.CASHFREE_NOTIFY_URL,
-                )
-            except Exception as exc:
-                logger.exception("Cashfree checkout initialization failed")
-                raise serializers.ValidationError(
-                    {"payment": "Unable to initialize Cashfree checkout."}
-                ) from exc
+                checkout = open_cashfree_checkout(user, total_amount, checkout_data)
+            except CheckoutUnavailable as exc:
+                raise serializers.ValidationError({"items": str(exc)}) from exc
+            except CheckoutInitializationError as exc:
+                raise serializers.ValidationError({"payment": str(exc)}) from exc
 
-            CashfreeCheckoutIntent.objects.create(
-                user=user,
-                cashfree_order_id=cf_order["order_id"],
-                payment_session_id=cf_order["payment_session_id"],
-                amount=total_amount,
-                checkout_data=checkout_data,
-            )
             return {
-                "payment_intent_id": cf_order["order_id"],
-                "cashfree_order_id": cf_order["order_id"],
-                "payment_session_id": cf_order["payment_session_id"],
+                "payment_intent_id": checkout.cashfree_order_id,
+                "cashfree_order_id": checkout.cashfree_order_id,
+                "payment_session_id": checkout.payment_session_id,
+                "payment_expires_at": checkout.expires_at.isoformat(),
                 "subtotal": str(subtotal),
                 "delivery_fee": str(delivery_fee),
                 "discount_amount": str(discount_amount),
@@ -426,10 +416,15 @@ class CreateOrderSerializer(serializers.Serializer):
             scheduled_slot_end=scheduled_slot_end,
         )
 
-        for item in order_items:
+        for item in sorted(order_items, key=lambda item: item["product"].pk):
+            product = Product.objects.select_for_update().get(pk=item["product"].pk)
+            inventory = Inventory.objects.select_for_update().get(product=product)
+            if inventory.available_stock() < item["quantity"]:
+                raise serializers.ValidationError(f"Insufficient stock for {product.name}")
+
             total_price = item['price'] * item['quantity']
             batch = (
-                StockBatch.objects
+                StockBatch.objects.select_for_update()
                 .filter(product=item['product'], quantity__gte=item['quantity'])
                 .order_by('created_at')
                 .first()
@@ -442,15 +437,8 @@ class CreateOrderSerializer(serializers.Serializer):
                 batch.quantity -= item['quantity']
                 batch.save()
 
-            inventory = item['product'].inventory
-            if inventory.total_stock < item['quantity']:
-                raise serializers.ValidationError(f"Insufficient stock for {item['product'].name}")
-            inventory.total_stock -= item['quantity']
-            if inventory.reserved_stock >= item['quantity']:
-                inventory.reserved_stock -= item['quantity']
-            else:
-                inventory.reserved_stock = 0
-            inventory.save()
+            inventory.total_stock -= item["quantity"]
+            inventory.save(update_fields=["total_stock", "updated_at"])
 
         if payment_method == "COD":
             order.payment_status = "PENDING"

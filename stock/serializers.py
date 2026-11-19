@@ -37,6 +37,9 @@ class InventorySerializer(serializers.ModelSerializer):
         return batch.batch_no if batch else None
 
 class StockBatchSerializer(serializers.ModelSerializer):
+    quantity = serializers.IntegerField(min_value=0)
+    selling_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+
     product_name = serializers.CharField(source='product.name', read_only=True)
 
     class Meta:

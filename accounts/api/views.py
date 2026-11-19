@@ -20,6 +20,7 @@ from orders.models import Order, DeliveryAssignment
 from restaurants.models import RestaurantOrder
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
+from accounts.email_identity import email_in_use
 from accounts.login_security import (
     prepare_login_attempt,
     record_failed_login,
@@ -140,6 +141,7 @@ class CustomerLoginAPIView(APIView):
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
 
+    @transaction.atomic
     def post(self, request):
 
         username = request.data.get("username")
@@ -173,7 +175,7 @@ class RegisterAPIView(APIView):
         except ValidationError as exc:
             return Response({"error": exc.messages}, status=status.HTTP_400_BAD_REQUEST)
 
-        if User.objects.filter(email=email).exists():
+        if email_in_use(User.objects.all(), email, lock=True):
             return Response({"error": "Email already exists"}, status=400)
 
         if User.objects.filter(phone=phone).exists():
@@ -445,7 +447,7 @@ class UpdateProfileAPIView(APIView):
         # ✅ EMAIL CHANGE FLOW (OTP REQUIRED)
         if email and email != user.email:
 
-            if User.objects.filter(email=email).exclude(id=user.id).exists():
+            if email_in_use(User.objects.exclude(pk=user.pk), email):
                 return Response({"error": "Email already in use"}, status=400)
 
             otp = str(random.randint(100000, 999999))
@@ -528,6 +530,7 @@ class RequestEmailOtpAPIView(APIView):
 class VerifyEmailChangeOTPAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @transaction.atomic
     def post(self, request):
         user = request.user
         otp_input = request.data.get("otp")
@@ -540,8 +543,12 @@ class VerifyEmailChangeOTPAPIView(APIView):
         if data["otp"] != otp_input:
             return Response({"error": "Invalid OTP"}, status=400)
 
-        user.email = data["email"]
-        user.save()
+        email = data["email"]
+        if email_in_use(User.objects.exclude(pk=user.pk), email, lock=True):
+            return Response({"error": "Email already in use"}, status=400)
+
+        user.email = email
+        user.save(update_fields=["email"])
 
         cache.delete(f"email_change_{user.id}")
 
@@ -556,6 +563,8 @@ class RequestEmailOtpAPIView(APIView):
             return Response({"error": "Email required"}, status=400)
 
         user = request.user
+        if email_in_use(User.objects.exclude(pk=user.pk), email):
+            return Response({"error": "Email already in use"}, status=400)
 
         otp = str(random.randint(100000, 999999))
 

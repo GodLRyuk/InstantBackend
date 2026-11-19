@@ -20,15 +20,28 @@ Key, and production return and webhook URLs. The code selects Cashfree's
 sandbox or production API endpoint from `CASHFREE_ENV`. Configure the matching
 webhook URL in the corresponding Cashfree dashboard environment.
 
-For grocery orders, `/api/orders/create/` now creates a Cashfree checkout intent,
-not an app order. The backend creates the app order only after server-side
-Cashfree verification succeeds, either through the authenticated
-`POST /api/verify-payment/` endpoint or the signed webhook. Failed or abandoned
-checkouts therefore do not create an order or consume stock.
+Grocery checkout at `POST /api/orders/create/` reserves inventory and returns
+a Cashfree payment session with `payment_expires_at`. The session expires after
+20 minutes. The backend creates the order after verifying the payment amount
+and currency through the signed webhook, the authenticated
+`POST /api/verify-payment/` endpoint, or the reconciliation worker.
 
-Apply database migrations before deploying. The client return URL is supplied
-by the existing client application. The webhook endpoint is
-`POST /api/payments/cashfree/webhook/`.
+The worker releases stock after Cashfree reports an expired or terminated
+checkout and all payment attempts are final and unpaid. A customer can close
+the payment screen without returning to the app. If Cashfree later reports a
+successful payment for a closed checkout, or the paid checkout cannot be
+fulfilled, the worker submits and tracks an idempotent refund. The verification
+endpoint reports `REFUND_PENDING`, `REFUNDED`, or `REFUND_FAILED`. A
+`REFUND_FAILED` result requires staff review in the Cashfree dashboard.
+
+Apply the database migrations and run the reconciliation worker with the same
+database and Cashfree settings as the web process. Docker Compose starts the
+`cashfree-reconciler` service. For other deployments, run
+`python manage.py reconcile_cashfree_checkouts --loop` under a process
+supervisor, or schedule the command without `--loop` to run every minute.
+
+The webhook endpoint is `POST /api/payments/cashfree/webhook/`.
+
 # Restaurant marketplace (Cashfree Easy Split)
 
 Restaurant order checkout still uses the existing Cashfree PG order flow. Marketplace settlement is an additional Easy Split flow and requires Easy Split to be enabled for the same Cashfree merchant account in both sandbox and production.

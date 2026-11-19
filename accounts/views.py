@@ -5,6 +5,8 @@ from rest_framework import status
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
+from django.db import transaction
+from accounts.email_identity import email_in_use
 User = get_user_model()
 class AdminLoginAPIView(APIView):
 
@@ -62,6 +64,7 @@ class RegisterAPIView(APIView):
 
     permission_classes = [AllowAny]
 
+    @transaction.atomic
     def post(self, request):
         User = get_user_model() 
         username = request.data.get("username")
@@ -80,7 +83,7 @@ class RegisterAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if User.objects.filter(email=email).exists():
+        if email_in_use(User.objects.all(), email, lock=True):
             return Response(
                 {"error": "Email already exists"},
                 status=status.HTTP_400_BAD_REQUEST

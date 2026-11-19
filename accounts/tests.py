@@ -9,6 +9,28 @@ from orders.models import DeliveryAssignment, Order
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend', EMAIL_HOST_USER='noreply@example.com')
 class RegisterAPITest(TestCase):
+    def test_registration_rejects_existing_gmail_mailbox_alias(self):
+        get_user_model().objects.create_user(
+            username="existing-gmail-user",
+            email="syl.mondal+old@googlemail.com",
+            phone="9876543200",
+            role="CUSTOMER",
+        )
+        payload = {
+            "username": "new-gmail-user",
+            "first_name": "Syl",
+            "last_name": "Mondal",
+            "email": "SYLMONDAL+new@gmail.com",
+            "password": "StrongPass123",
+            "phone": "9876543201",
+        }
+
+        response = self.client.post("/api/accounts/register/", payload, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {"error": "Email already exists"})
+        self.assertFalse(get_user_model().objects.filter(username=payload["username"]).exists())
+
     def test_register_saves_first_and_last_name(self):
         client = APIClient()
         payload = {

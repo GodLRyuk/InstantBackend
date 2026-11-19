@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -434,25 +436,32 @@ class ProcessPaymentSplitsView(APIView):
     permission_classes = [IsAuthenticated, IsStaffUser]
 
     def post(self, request):
-        from datetime import timedelta
-        from django.utils import timezone
+        return self.run()
+
+    @staticmethod
+    def run(order_id=None):
         processed = 0
         failed = 0
-        due = PaymentSplit.objects.select_related('order', 'vendor').filter(
+        due = PaymentSplit.objects.filter(
             cashfree_split_status__in=[PaymentSplit.Status.PENDING, PaymentSplit.Status.FAILED],
             paid_at__lte=timezone.now() - timedelta(minutes=2),
             order__payment_status=RestaurantOrder.PaymentStatus.PAID,
-        ).order_by('paid_at')[:100]
-        for candidate in due:
+        )
+        if order_id is not None:
+            due = due.filter(order_id=order_id)
+        for candidate in due.order_by('paid_at')[:100]:
             with transaction.atomic():
+                order = RestaurantOrder.objects.select_for_update().get(pk=candidate.order_id)
                 split = PaymentSplit.objects.select_for_update().get(pk=candidate.pk)
-                if split.cashfree_split_status not in [PaymentSplit.Status.PENDING, PaymentSplit.Status.FAILED]:
+                if order.payment_status != P.PAID or split.cashfree_split_status not in [
+                    PaymentSplit.Status.PENDING, PaymentSplit.Status.FAILED,
+                ]:
                     continue
                 split.cashfree_split_status = PaymentSplit.Status.PROCESSING
                 split.save(update_fields=['cashfree_split_status', 'updated_at'])
             try:
                 result = services.cashfree.submit_order_split(
-                    split.order.cashfree_order_id,
+                    order.cashfree_order_id,
                     vendor_id=split.vendor.cashfree_vendor_id,
                     vendor_percentage=Decimal('100') - split.commission_percentage,
                 )
@@ -473,12 +482,18 @@ class SyncPaymentSplitsView(APIView):
     permission_classes = [IsAuthenticated, IsStaffUser]
 
     def post(self, request):
+        return self.run()
+
+    @staticmethod
+    def run(order_id=None):
         synced = 0
         failed = 0
         splits = PaymentSplit.objects.select_related('order', 'vendor').filter(
             cashfree_split_status__in=[PaymentSplit.Status.SUBMITTED, PaymentSplit.Status.SETTLED]
-        ).order_by('updated_at')[:100]
-        for split in splits:
+        )
+        if order_id is not None:
+            splits = splits.filter(order_id=order_id)
+        for split in splits.order_by('updated_at')[:100]:
             try:
                 details = services.cashfree.get_order_split_details(split.order.cashfree_order_id)
             except Exception:
@@ -506,32 +521,41 @@ class ProcessRestaurantRefundsView(APIView):
     permission_classes = [IsAuthenticated, IsStaffUser]
 
     def post(self, request):
+        return self.run()
+
+    @staticmethod
+    def run(order_id=None):
         processed = 0
         failed = 0
-        refunds = RestaurantRefund.objects.select_related('order').filter(
+        refunds = RestaurantRefund.objects.filter(
             status__in=[RestaurantRefund.Status.PENDING, RestaurantRefund.Status.FAILED],
             order__payment_status=RestaurantOrder.PaymentStatus.REFUND_PENDING,
-        ).order_by('created_at')[:100]
-        for candidate in refunds:
+        )
+        if order_id is not None:
+            refunds = refunds.filter(order_id=order_id)
+        for candidate in refunds.order_by('created_at')[:100]:
             with transaction.atomic():
-                refund = RestaurantRefund.objects.select_for_update().select_related(
-                    'order', 'order__payment_split', 'order__payment_split__vendor'
-                ).get(pk=candidate.pk)
-                if refund.status not in [RestaurantRefund.Status.PENDING, RestaurantRefund.Status.FAILED]:
+                order = RestaurantOrder.objects.select_for_update().get(pk=candidate.order_id)
+                refund = RestaurantRefund.objects.select_for_update().get(pk=candidate.pk)
+                if order.payment_status != P.REFUND_PENDING or refund.status not in [
+                    RestaurantRefund.Status.PENDING, RestaurantRefund.Status.FAILED,
+                ]:
+                    continue
+                split = PaymentSplit.objects.select_related('vendor').filter(order=order).first()
+                if split and split.cashfree_split_status == PaymentSplit.Status.PROCESSING:
                     continue
                 refund.status = RestaurantRefund.Status.PROCESSING
                 refund.save(update_fields=['status', 'updated_at'])
-            split = getattr(refund.order, 'payment_split', None)
             refund_splits = None
             if split and split.cashfree_split_status in [PaymentSplit.Status.SUBMITTED, PaymentSplit.Status.SETTLED]:
                 refund_splits = [{'vendor_id': split.vendor.cashfree_vendor_id,
                                   'amount': float(split.vendor_amount)}]
             try:
                 result = services.cashfree.create_refund(
-                    refund.order.cashfree_order_id,
+                    order.cashfree_order_id,
                     refund_id=refund.refund_id,
                     amount=refund.amount,
-                    note=refund.order.rejection_reason or 'Restaurant order cancelled',
+                    note=order.rejection_reason or 'Restaurant order cancelled',
                     refund_splits=refund_splits,
                 )
                 refund.cashfree_refund_id = str(result.get('cf_refund_id', ''))
@@ -540,11 +564,15 @@ class ProcessRestaurantRefundsView(APIView):
                 refund.status = (RestaurantRefund.Status.SUCCESS if status_value == 'SUCCESS'
                                  else RestaurantRefund.Status.SUBMITTED if status_value in {'PENDING', 'QUEUED'}
                                  else RestaurantRefund.Status.FAILED)
-                refund.save(update_fields=['cashfree_refund_id', 'cashfree_response', 'status', 'updated_at'])
-                if refund.status == RestaurantRefund.Status.SUCCESS:
-                    RestaurantOrder.objects.filter(pk=refund.order_id).update(
-                        payment_status=RestaurantOrder.PaymentStatus.REFUNDED)
-                processed += 1
+                with transaction.atomic():
+                    RestaurantOrder.objects.select_for_update().get(pk=refund.order_id)
+                    refund.save(update_fields=['cashfree_refund_id', 'cashfree_response', 'status', 'updated_at'])
+                    if refund.status == RestaurantRefund.Status.SUCCESS:
+                        RestaurantOrder.objects.filter(pk=refund.order_id).update(payment_status=P.REFUNDED)
+                if refund.status == RestaurantRefund.Status.FAILED:
+                    failed += 1
+                else:
+                    processed += 1
             except Exception:
                 refund.status = RestaurantRefund.Status.FAILED
                 refund.save(update_fields=['status', 'updated_at'])
@@ -552,23 +580,30 @@ class ProcessRestaurantRefundsView(APIView):
         # Poll existing refunds in the same cron pass.
         pending = RestaurantRefund.objects.select_related('order').filter(
             status=RestaurantRefund.Status.SUBMITTED
-        ).order_by('updated_at')[:100]
+        )
+        if order_id is not None:
+            pending = pending.filter(order_id=order_id)
         synced = 0
-        for refund in pending:
+        for refund in pending.order_by('updated_at')[:100]:
             try:
                 result = services.cashfree.get_refund(refund.order.cashfree_order_id, refund.refund_id)
             except Exception:
                 failed += 1
                 continue
-            refund.cashfree_response = result
-            value = str(result.get('refund_status', '')).upper()
-            if value == 'SUCCESS':
-                refund.status = RestaurantRefund.Status.SUCCESS
-                RestaurantOrder.objects.filter(pk=refund.order_id).update(
-                    payment_status=RestaurantOrder.PaymentStatus.REFUNDED)
-            elif value in {'FAILED', 'CANCELLED'}:
-                refund.status = RestaurantRefund.Status.FAILED
-            refund.save(update_fields=['cashfree_response', 'status', 'updated_at'])
+            with transaction.atomic():
+                RestaurantOrder.objects.select_for_update().get(pk=refund.order_id)
+                current = RestaurantRefund.objects.select_for_update().get(pk=refund.pk)
+                if current.status != RestaurantRefund.Status.SUBMITTED:
+                    continue
+                current.cashfree_response = result
+                current.cashfree_refund_id = str(result.get('cf_refund_id') or current.cashfree_refund_id)
+                value = str(result.get('refund_status', '')).upper()
+                if value == 'SUCCESS':
+                    current.status = RestaurantRefund.Status.SUCCESS
+                    RestaurantOrder.objects.filter(pk=refund.order_id).update(payment_status=P.REFUNDED)
+                elif value in {'FAILED', 'CANCELLED'}:
+                    current.status = RestaurantRefund.Status.FAILED
+                current.save(update_fields=['cashfree_response', 'cashfree_refund_id', 'status', 'updated_at'])
             synced += 1
         return Response({'processed': processed, 'failed': failed, 'synced': synced})
 

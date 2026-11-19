@@ -11,6 +11,7 @@ from orders.models import CashfreeCheckoutIntent, Order
 from orders.payment_fulfillment import (
     activate_paid_order,
     finalize_cashfree_checkout,
+    reconcile_unpaid_cashfree_order,
 )
 from restaurants.models import RestaurantOrder
 
@@ -46,14 +47,20 @@ class CashfreeWebhookView(APIView):
         except Exception:
             return HttpResponse(status=503)
         if not payment:
+            try:
+                if CashfreeCheckoutIntent.objects.filter(cashfree_order_id=provider_order_id).exists() or (
+                    Order.objects.filter(cashfree_order_id=provider_order_id).exists()
+                ):
+                    reconcile_unpaid_cashfree_order(provider_order_id)
+            except Exception:
+                logger.exception("Could not reconcile unpaid Cashfree checkout %s", provider_order_id)
+                return HttpResponse(status=503)
             return HttpResponse(status=200)
 
         intent = CashfreeCheckoutIntent.objects.filter(
             cashfree_order_id=provider_order_id
         ).first()
         if intent:
-            if not cashfree.payment_matches(payment, amount=intent.amount):
-                return HttpResponse(status=400)
             try:
                 order = finalize_cashfree_checkout(intent.pk, payment)
                 if order:
@@ -73,6 +80,9 @@ class CashfreeWebhookView(APIView):
             if order:
                 if not cashfree.payment_matches(payment, amount=order.total_amount):
                     return HttpResponse(status=400)
+                if order.order_status == "CANCELLED" or order.payment_status == "FAILED":
+                    logger.error("Successful Cashfree payment for closed order %s", order.pk)
+                    return HttpResponse(status=409)
                 if order.payment_status != 'PAID':
                     order.cashfree_payment_id = str(payment.get('cf_payment_id', ''))
                     order.mark_paid()

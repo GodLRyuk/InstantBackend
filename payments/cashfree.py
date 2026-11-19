@@ -34,9 +34,9 @@ def _headers():
 
 
 def create_order(*, amount, currency, customer_id, customer_phone, customer_email='',
-                 order_note='', return_url='', notify_url=''):
+                 order_note='', return_url='', notify_url='', order_id=None, expires_at=None):
     # The opaque ID prevents collisions across grocery and restaurant sequences.
-    provider_order_id = f'cf_{uuid.uuid4().hex}'
+    provider_order_id = order_id or f'cf_{uuid.uuid4().hex}'
     body = {
         'order_id': provider_order_id,
         'order_amount': float(amount),
@@ -46,6 +46,8 @@ def create_order(*, amount, currency, customer_id, customer_phone, customer_emai
             'customer_phone': str(customer_phone),
         },
     }
+    if expires_at is not None:
+        body['order_expiry_time'] = expires_at.isoformat(timespec='seconds')
     if customer_email:
         body['customer_details']['customer_email'] = customer_email
     if order_note:
@@ -58,7 +60,9 @@ def create_order(*, amount, currency, customer_id, customer_phone, customer_emai
     if meta:
         body['order_meta'] = meta
     response = requests.post(
-        f'{_base_url()}/orders', headers=_headers(), json=body, timeout=20
+        f'{_base_url()}/orders',
+        headers={**_headers(), **_request_idempotency_headers(f'order:{provider_order_id}')},
+        json=body, timeout=20
     )
     if not response.ok:
         # Cashfree's response is useful for operational diagnosis; never log
@@ -99,9 +103,10 @@ def verify_webhook(raw_body, timestamp, signature):
     return hmac.compare_digest(expected, signature)
 
 
-def success_payment(provider_order_id):
+def success_payment(provider_order_id, *, order=None):
     """Return successful payment details only after querying Cashfree server-side."""
-    order = get_order(provider_order_id)
+    if order is None:
+        order = get_order(provider_order_id)
     if order.get('order_status') != 'PAID':
         return None
     payments = get_payments(provider_order_id)
