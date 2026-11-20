@@ -638,8 +638,24 @@ class PartnerMenuWorkbookView(APIView):
         return Response(menu_workbook.import_menu(restaurant, request.FILES.get('file')))
 
 
-class PartnerCategoryViewSet(PartnerBaseMixin, viewsets.ModelViewSet):
+class PartnerBulkMenuMixin:
+    @action(detail=False, methods=['get', 'post'], parser_classes=[MultiPartParser])
+    def bulk(self, request):
+        if request.method == 'GET':
+            return menu_workbook.export_menu(
+                self.restaurant,
+                template=request.query_params.get('template') == '1',
+                sheet_name=self.workbook_sheet,
+            )
+        result = menu_workbook.import_menu(
+            self.restaurant, request.FILES.get('file'), sheet_name=self.workbook_sheet,
+        )
+        return Response(result[self.workbook_sheet.lower()])
+
+
+class PartnerCategoryViewSet(PartnerBaseMixin, PartnerBulkMenuMixin, viewsets.ModelViewSet):
     serializer_class = MenuCategorySerializer
+    workbook_sheet = 'Categories'
 
     def get_queryset(self):
         return MenuCategory.objects.filter(restaurant=self.restaurant)
@@ -648,11 +664,12 @@ class PartnerCategoryViewSet(PartnerBaseMixin, viewsets.ModelViewSet):
         serializer.save(restaurant=self.restaurant)
 
 
-class PartnerItemViewSet(PartnerBaseMixin, viewsets.ModelViewSet):
+class PartnerItemViewSet(PartnerBaseMixin, PartnerBulkMenuMixin, viewsets.ModelViewSet):
     """Dishes. Send multipart when uploading an image."""
 
     parser_classes = [JSONParser, FormParser, MultiPartParser]
     serializer_class = PartnerMenuItemSerializer
+    workbook_sheet = 'Items'
 
     def get_queryset(self):
         qs = MenuItem.objects.filter(restaurant=self.restaurant).select_related('category')
