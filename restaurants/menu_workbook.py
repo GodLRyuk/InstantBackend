@@ -16,34 +16,40 @@ from .serializers import MenuCategorySerializer, PartnerMenuItemSerializer
 
 CATEGORY_COLUMNS = ('id', 'name', 'sort_order')
 ITEM_COLUMNS = (
-    'id', 'name', 'category_name', 'description', 'is_veg', 'price', 'mrp',
+    'id', 'name', 'category_id', 'description', 'is_veg', 'price', 'mrp',
     'is_available', 'packaging_charge', 'sort_order',
 )
 MAX_FILE_SIZE = 5 * 1024 * 1024
 MAX_UNCOMPRESSED_SIZE = 40 * 1024 * 1024
 
 
-def export_menu(restaurant, template=False):
+def export_menu(restaurant, template=False, *, sheet_name=None):
     workbook = Workbook(write_only=True)
-    categories = workbook.create_sheet('Categories')
-    items = workbook.create_sheet('Items')
-    for sheet, columns in ((categories, CATEGORY_COLUMNS), (items, ITEM_COLUMNS)):
+    sheets = {}
+    for name, columns in (('Categories', CATEGORY_COLUMNS), ('Items', ITEM_COLUMNS)):
+        if sheet_name is not None and name != sheet_name:
+            continue
+        sheet = workbook.create_sheet(name)
+        sheets[name] = sheet
         sheet.freeze_panes = 'A2'
-        sheet.append(columns)
+        sheet.append(columns[1:] if template and sheet_name else columns)
 
-    if not template:
+    if not template and 'Categories' in sheets:
         for category in restaurant.categories.iterator():
-            _append_row(categories, (category.pk, category.name, category.sort_order))
-        for item in restaurant.items.select_related('category').iterator():
-            _append_row(items, (
-                item.pk, item.name, item.category.name if item.category else None,
+            _append_row(sheets['Categories'], (category.pk, category.name, category.sort_order))
+    if not template and 'Items' in sheets:
+        for item in restaurant.items.iterator():
+            _append_row(sheets['Items'], (
+                item.pk, item.name, item.category_id,
                 item.description, item.is_veg, item.price, item.mrp, item.is_available,
                 item.packaging_charge, item.sort_order,
             ))
 
     output = BytesIO()
     workbook.save(output)
-    filename = 'menu-template.xlsx' if template else f'menu-{restaurant.pk}.xlsx'
+    workbook_name = f'menu-{sheet_name.lower()}' if sheet_name else 'menu'
+    suffix = 'template' if template else restaurant.pk
+    filename = f'{workbook_name}-{suffix}.xlsx'
     response = HttpResponse(
         output.getvalue(),
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -88,17 +94,20 @@ def _sheet_rows(sheet, columns, required):
         yield row_number, dict(zip(header, (cell.value for cell in cells)))
 
 
-def _find_instance(queryset, value):
+def _find_instance(queryset, value, *, field='id'):
     if value is None:
         return None
-    pk = serializers.IntegerField(min_value=1, max_value=2**63 - 1).run_validation(value)
+    try:
+        pk = serializers.IntegerField(min_value=1, max_value=2**63 - 1).run_validation(value)
+    except ValidationError as exc:
+        raise ValidationError({field: exc.detail}) from exc
     instance = queryset.filter(pk=pk).first()
     if instance is None:
-        raise ValidationError({'id': 'This ID does not belong to the selected restaurant.'})
+        raise ValidationError({field: 'This ID does not belong to the selected restaurant.'})
     return instance
 
 
-def _import_sheet(sheet, restaurant, *, categories):
+def _import_sheet(sheet, restaurant, *, categories, allow_category_name=False):
     if categories:
         queryset = restaurant.categories.all()
         serializer_class = MenuCategorySerializer
@@ -107,6 +116,8 @@ def _import_sheet(sheet, restaurant, *, categories):
         queryset = restaurant.items.all()
         serializer_class = PartnerMenuItemSerializer
         columns, required = ITEM_COLUMNS, ('name', 'price')
+        if allow_category_name:
+            columns += ('category_name',)
 
     counts = {'created': 0, 'updated': 0}
     seen = set()
@@ -123,7 +134,14 @@ def _import_sheet(sheet, restaurant, *, categories):
             if instance is not None and instance.pk in seen:
                 raise ValidationError({'id': 'This entry appears more than once in the sheet.'})
 
-            if 'category_name' in values:
+            if 'category_id' in values:
+                if 'category_name' in values:
+                    raise ValidationError({'category_id': 'Use one category column.'})
+                category = _find_instance(
+                    restaurant.categories.all(), values.pop('category_id'), field='category_id',
+                )
+                values['category'] = category.pk if category else None
+            elif 'category_name' in values:
                 name = values.pop('category_name')
                 values['category'] = None
                 if name is not None and str(name).strip():
@@ -156,7 +174,7 @@ def _import_sheet(sheet, restaurant, *, categories):
     return counts
 
 
-def import_menu(restaurant, upload):
+def import_menu(restaurant, upload, *, sheet_name=None):
     if not upload or not upload.name.lower().endswith('.xlsx'):
         raise ValidationError({'file': 'Upload an Excel .xlsx file.'})
     if upload.size > MAX_FILE_SIZE:
@@ -170,7 +188,10 @@ def import_menu(restaurant, upload):
         workbook = load_workbook(upload, read_only=True, keep_links=False)
         try:
             sheets = set(workbook.sheetnames)
-            if not sheets.intersection({'Categories', 'Items'}):
+            if sheet_name is not None:
+                if sheets != {sheet_name}:
+                    raise ValidationError({'file': f'Use a workbook with only a {sheet_name} worksheet.'})
+            elif not sheets.intersection({'Categories', 'Items'}):
                 raise ValidationError({'file': 'Include a Categories or Items worksheet.'})
 
             result = {}
@@ -182,6 +203,7 @@ def import_menu(restaurant, upload):
                     try:
                         result[name.lower()] = _import_sheet(
                             workbook[name], restaurant, categories=name == 'Categories',
+                            allow_category_name=sheet_name is None,
                         )
                     except ValidationError as exc:
                         raise ValidationError({name: exc.detail}) from exc

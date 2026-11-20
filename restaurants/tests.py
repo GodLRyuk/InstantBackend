@@ -197,14 +197,58 @@ class RestaurantMenuAPITests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(user=self.owner)
 
-    def upload_menu(self, workbook):
+    def upload_menu(self, workbook, url='/api/restaurants/partner/menu-workbook/'):
         output = BytesIO()
         workbook.save(output)
         return self.client.post(
-            '/api/restaurants/partner/menu-workbook/',
+            url,
             {'file': SimpleUploadedFile('menu.xlsx', output.getvalue())},
             format='multipart',
         )
+
+    def test_separate_bulk_endpoints_have_single_sheet_templates_and_imports(self):
+        categories_url = '/api/restaurants/partner/categories/bulk/'
+        items_url = '/api/restaurants/partner/items/bulk/'
+        categories = load_workbook(BytesIO(self.client.get(categories_url, {'template': '1'}).content))
+        self.assertEqual(categories.sheetnames, ['Categories'])
+        self.assertEqual(list(categories.active.values), [('name', 'sort_order')])
+        categories.active.append(['Starters', 1])
+        categories.active.append(['Main Course', 2])
+
+        wrong_endpoint = self.upload_menu(categories, items_url)
+        self.assertEqual(wrong_endpoint.status_code, 400)
+        self.assertFalse(self.restaurant.categories.exists())
+        response = self.upload_menu(categories, categories_url)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data, {'created': 2, 'updated': 0})
+        self.assertEqual(
+            list(self.restaurant.categories.values_list('name', 'sort_order')),
+            [('Starters', 1), ('Main Course', 2)],
+        )
+
+        items = load_workbook(BytesIO(self.client.get(items_url, {'template': '1'}).content))
+        self.assertEqual(items.sheetnames, ['Items'])
+        self.assertEqual(items.active['B1'].value, 'category_id')
+        category = self.restaurant.categories.get(name='Main Course')
+        items.active.append(['Thali', category.pk, 'Daily special', True, 199])
+        response = self.upload_menu(items, items_url)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data, {'created': 1, 'updated': 0})
+        self.assertEqual(self.restaurant.items.get().category_id, category.pk)
+        exported_items = load_workbook(BytesIO(self.client.get(items_url).content))
+        self.assertEqual(exported_items.active['C2'].value, category.pk)
+
+        foreign_category = self.other_restaurant.categories.create(name='Other Main Course')
+        items.active['B2'] = foreign_category.pk
+        response = self.upload_menu(items, items_url)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('category_id', response.data['Items']['row 2'])
+        self.assertEqual(self.restaurant.items.count(), 1)
+
+        exported = load_workbook(BytesIO(self.client.get(categories_url).content))
+        self.assertEqual(exported.sheetnames, ['Categories'])
+        self.assertEqual(exported.active['A1'].value, 'id')
+        self.assertEqual(exported.active['B2'].value, 'Starters')
 
     def test_excel_template_import_and_export_round_trip(self):
         url = '/api/restaurants/partner/menu-workbook/'
@@ -212,6 +256,7 @@ class RestaurantMenuAPITests(TestCase):
         self.assertEqual(template.status_code, 200)
         workbook = load_workbook(BytesIO(template.content))
         workbook['Categories'].append([None, 'Lunch', 2])
+        workbook['Items']['C1'] = 'category_name'  # Previously downloaded combined workbook.
         workbook['Items'].append([None, 'Thali', 'Lunch', 'Daily special', False, 199])
         response = self.upload_menu(workbook)
         self.assertEqual(response.status_code, 200, response.data)

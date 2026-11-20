@@ -8,7 +8,7 @@
   </ul>
 
   {% if can_import %}
-    <p>Enter a name for each category and a name and price for each item. Use the category's name in the item's <code>category_name</code> column.</p>
+    <p>Enter a name for each category and a name and price for each item. For new categories, upload the Categories sheet first, then export the menu to get their IDs. Enter the category ID in the item's <code>category_id</code> column.</p>
     <p>Keep exported IDs to update existing rows. Leave the ID blank to add an item or match a category by name.</p>
     <p>Files can contain up to 10,000 rows per sheet and must be 5 MB or smaller. Manage item photos separately.</p>
     {% if errors %}
