@@ -1,0 +1,33 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <p><a href="{% url 'admin:restaurants_restaurant_change' restaurant.pk %}">{{ restaurant }}</a></p>
+  <ul>
+    {% if can_export %}<li><a href="?download=menu">Export current menu (.xlsx)</a></li>{% endif %}
+    <li><a href="?download=template">Download Excel template (.xlsx)</a></li>
+  </ul>
+
+  {% if can_import %}
+    <p>Enter a name for each category and a name and price for each item. Use the category's name in the item's <code>category_name</code> column.</p>
+    <p>Keep exported IDs to update existing rows. Leave the ID blank to add an item or match a category by name.</p>
+    <p>Files can contain up to 10,000 rows per sheet and must be 5 MB or smaller. Manage item photos separately.</p>
+    {% if errors %}
+      <div class="errornote" role="alert">
+        <p>Upload failed. No menu changes were saved.</p>
+        <ul>
+          {% for error in errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      <label for="menu-file">Excel workbook</label>
+      <input id="menu-file" name="file" type="file" accept=".xlsx" required>
+      <div class="submit-row">
+        <input type="submit" value="Upload menu" class="default">
+      </div>
+    </form>
+  {% endif %}
+{% endblock %}

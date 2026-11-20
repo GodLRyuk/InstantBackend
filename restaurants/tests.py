@@ -13,6 +13,7 @@ from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
+from openpyxl import Workbook, load_workbook
 from PIL import Image
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -195,6 +196,90 @@ class RestaurantMenuAPITests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(user=self.owner)
+
+    def upload_menu(self, workbook):
+        output = BytesIO()
+        workbook.save(output)
+        return self.client.post(
+            '/api/restaurants/partner/menu-workbook/',
+            {'file': SimpleUploadedFile('menu.xlsx', output.getvalue())},
+            format='multipart',
+        )
+
+    def test_excel_template_import_and_export_round_trip(self):
+        url = '/api/restaurants/partner/menu-workbook/'
+        template = self.client.get(url, {'template': '1'})
+        self.assertEqual(template.status_code, 200)
+        workbook = load_workbook(BytesIO(template.content))
+        workbook['Categories'].append([None, 'Lunch', 2])
+        workbook['Items'].append([None, 'Thali', 'Lunch', 'Daily special', False, 199])
+        response = self.upload_menu(workbook)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['items'], {'created': 1, 'updated': 0})
+        item = self.restaurant.items.get()
+        self.assertEqual(item.category.name, 'Lunch')
+        self.assertFalse(item.is_veg)
+        self.assertTrue(item.is_available)
+
+        item.name = '=Lunch'
+        item.image = 'restaurants/items/lunch.png'
+        item.save()
+        export = self.client.get(url)
+        self.assertEqual(export.status_code, 200)
+        workbook = load_workbook(BytesIO(export.content))
+        self.assertEqual(workbook['Items']['B2'].data_type, 's')
+        self.assertEqual(workbook['Items']['B2'].value, '=Lunch')
+        workbook['Items']['F2'] = 209
+        response = self.upload_menu(workbook)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['items'], {'created': 0, 'updated': 1})
+        item.refresh_from_db()
+        self.assertEqual(item.price, Decimal('209.00'))
+        self.assertEqual(item.image.name, 'restaurants/items/lunch.png')
+        self.assertEqual(self.restaurant.items.count(), 1)
+
+    def test_excel_rejects_foreign_item_id_and_rolls_back_new_categories(self):
+        item = self.other_restaurant.items.create(name='Other dish', price=100)
+        workbook = Workbook()
+        categories = workbook.active
+        categories.title = 'Categories'
+        categories.append(['name'])
+        categories.append(['Lunch'])
+        items = workbook.create_sheet('Items')
+        items.append(['id', 'name', 'price'])
+        items.append([item.pk, 'Updated', 150])
+
+        response = self.upload_menu(workbook)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('id', response.data['Items']['row 2'])
+        self.assertFalse(self.restaurant.categories.exists())
+        item.refresh_from_db()
+        self.assertEqual(item.name, 'Other dish')
+
+    @override_settings(DEBUG=True)
+    def test_django_admin_menu_workbook_page_download_and_upload(self):
+        admin_user = get_user_model().objects.create_superuser(
+            username='menu-admin', password='StrongPass123', phone='9876543230',
+        )
+        self.client.force_login(admin_user)
+        change_url = f'/admin/restaurants/restaurant/{self.restaurant.pk}/change/'
+        workbook_url = f'/admin/restaurants/restaurant/{self.restaurant.pk}/menu-workbook/'
+        self.assertContains(self.client.get(change_url), workbook_url)
+        self.assertContains(self.client.get(workbook_url), 'Upload menu')
+        download = self.client.get(workbook_url, {'download': 'template'})
+        self.assertEqual(download.status_code, 200)
+        workbook = load_workbook(BytesIO(download.content))
+        self.assertEqual(workbook.sheetnames, ['Categories', 'Items'])
+        workbook['Categories'].append([None, 'Breakfast'])
+        output = BytesIO()
+        workbook.save(output)
+        response = self.client.post(
+            workbook_url,
+            {'file': SimpleUploadedFile('menu.xlsx', output.getvalue())},
+            format='multipart',
+        )
+        self.assertRedirects(response, workbook_url)
+        self.assertTrue(self.restaurant.categories.filter(name='Breakfast').exists())
 
     def test_restaurant_owner_can_add_edit_and_delete_own_menu_item(self):
         create_response = self.client.post(

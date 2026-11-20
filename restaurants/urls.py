@@ -20,6 +20,7 @@ urlpatterns = [
     path('cuisines/', views.CuisineListView.as_view(), name='restaurant-cuisines'),
     path('delivery-charge/', views.DeliveryChargeView.as_view(), name='restaurant-delivery-charge'),
     path('partner/onboard/', views.PartnerOnboardView.as_view(), name='partner-onboard'),
+    path('partner/menu-workbook/', views.PartnerMenuWorkbookView.as_view(), name='partner-menu-workbook'),
     path('admin/commissions/', payment_admin.CommissionsView.as_view(), name='admin-commissions'),
     path('admin/payment-splits/', payment_admin.SplitsView.as_view(), name='admin-payment-splits'),
     path('admin/refunds/', payment_admin.RefundsView.as_view(), name='admin-restaurant-refunds'),
