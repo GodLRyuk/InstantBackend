@@ -7,21 +7,26 @@ from django.apps import apps
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
+from django.db.models import Prefetch
 from django.forms.models import model_to_dict
 from rest_framework.exceptions import APIException, ValidationError
 from payments import cashfree
 
 from .models import (
     MenuItem,
+    MenuItemAddOnGroup,
+    MenuItemAddOnOption,
     Restaurant,
     RestaurantDeliveryAssignment,
     RestaurantOrder,
     RestaurantOrderItem,
+    RestaurantOrderItemAddOn,
     RestaurantRefund,
 )
 from .utils import haversine_km, whole_rupees
 
 GST_RATE = Decimal('0.05')
+MAX_ORDER_AMOUNT = Decimal('99999999.99')
 
 S = RestaurantOrder.Status
 P = RestaurantOrder.PaymentStatus
@@ -50,8 +55,16 @@ def notify_restaurant_owner_order_placed(order):
                         'quantity': item.quantity,
                         'is_veg': item.is_veg,
                         'unit_price': str(item.unit_price),
+                        'addons': [
+                            {
+                                'group_name': addon.group_name,
+                                'name': addon.name,
+                                'unit_price': str(addon.unit_price),
+                            }
+                            for addon in item.addons.all()
+                        ],
                     }
-                    for item in order.items.all()
+                    for item in order.items.prefetch_related('addons')
                 ],
             },
         )
@@ -165,10 +178,10 @@ def calculate_delivery_charge(restaurant, distance_km=None):
     return delivery_fee.quantize(Decimal('0.01'))
 
 
-def calculate_bill(restaurant, lines, distance_km=None):
+def calculate_bill(restaurant, lines, distance_km=None, *, addon_total=Decimal('0')):
     """Price a restaurant cart, including the distance-based delivery surcharge."""
     lines = list(lines)
-    item_total = sum((Decimal(i.price) * q for i, q in lines), Decimal('0'))
+    item_total = sum((Decimal(i.price) * q for i, q in lines), addon_total)
     packaging = sum((Decimal(i.packaging_charge) for i, _ in lines), Decimal('0'))  # once per dish
 
     discount = Decimal('0')
@@ -220,6 +233,46 @@ def resolve_address(user, address_id):
 
 
 # ---------------------------------------------------------------- quote
+@dataclass
+class PricedMenuLine:
+    item: MenuItem
+    quantity: int
+    addons: tuple[MenuItemAddOnOption, ...] = ()
+
+    @property
+    def addon_total(self):
+        return sum((option.price for option in self.addons), Decimal('0')) * self.quantity
+
+
+def available_addon_groups():
+    return MenuItemAddOnGroup.objects.filter(is_active=True).prefetch_related(
+        Prefetch('options', queryset=MenuItemAddOnOption.objects.filter(
+            is_available=True,
+        ).select_related('group')),
+    )
+
+
+def resolve_addons(item, option_ids):
+    requested = set(option_ids)
+    if len(requested) != len(option_ids):
+        raise ValidationError({'items': f'Choose each add-on only once for "{item.name}".'})
+
+    selected = []
+    for group in item.addon_groups.all():
+        options = [option for option in group.options.all() if option.id in requested]
+        if not group.min_selections <= len(options) <= group.max_selections:
+            raise ValidationError({
+                'items': (
+                    f'Choose {group.min_selections} to {group.max_selections} options '
+                    f'from "{group.name}" for "{item.name}".'
+                ),
+            })
+        selected.extend(options)
+    if len(selected) != len(requested):
+        raise ValidationError({'items': f'An add-on is unavailable for "{item.name}".'})
+    return tuple(selected)
+
+
 def build_quote(user, restaurant_id, items, address_id=None):
     """Validates a cart against the database and prices it. Never trusts client prices."""
     try:
@@ -230,12 +283,18 @@ def build_quote(user, restaurant_id, items, address_id=None):
         raise ValidationError({'restaurant_id': 'This restaurant is not accepting orders right now.'})
 
     wanted = {}
+    variants = {}
     for row in items:
-        wanted[row['menu_item_id']] = wanted.get(row['menu_item_id'], 0) + row['quantity']
+        item_id, quantity = row['menu_item_id'], row['quantity']
+        wanted[item_id] = wanted.get(item_id, 0) + quantity
+        key = (item_id, tuple(sorted(row.get('addon_option_ids', ()))))
+        variants[key] = variants.get(key, 0) + quantity
     found = {
-        m.id: m for m in MenuItem.objects.filter(restaurant=restaurant, pk__in=wanted.keys())
+        item.id: item
+        for item in MenuItem.objects.filter(restaurant=restaurant, pk__in=wanted).prefetch_related(
+            Prefetch('addon_groups', queryset=available_addon_groups()),
+        )
     }
-    lines = []
     for item_id, qty in wanted.items():
         item = found.get(item_id)
         if item is None:
@@ -244,7 +303,10 @@ def build_quote(user, restaurant_id, items, address_id=None):
             raise ValidationError({'items': f'"{item.name}" is currently unavailable.'})
         if qty > 20:
             raise ValidationError({'items': f'You can order at most 20 of "{item.name}".'})
-        lines.append((item, qty))
+    lines = [
+        PricedMenuLine(found[item_id], quantity, resolve_addons(found[item_id], option_ids))
+        for (item_id, option_ids), quantity in variants.items()
+    ]
 
     address = None
     distance_km = None
@@ -261,11 +323,17 @@ def build_quote(user, restaurant_id, items, address_id=None):
                     {'address_id': 'This restaurant does not deliver to your location.'}
                 )
 
-    bill = calculate_bill(restaurant, lines, distance_km=distance_km)
+    bill = calculate_bill(
+        restaurant, ((found[item_id], quantity) for item_id, quantity in wanted.items()),
+        distance_km=distance_km,
+        addon_total=sum((line.addon_total for line in lines), Decimal('0')),
+    )
     if bill.item_total < restaurant.min_order_amount:
         raise ValidationError(
             {'items': f'Minimum order for this restaurant is Rs {restaurant.min_order_amount:.0f}.'}
         )
+    if max(bill.item_total, bill.total) > MAX_ORDER_AMOUNT:
+        raise ValidationError({'items': 'The order amount exceeds the supported limit.'})
 
     return {
         'restaurant': restaurant,
@@ -327,21 +395,30 @@ def create_order(user, quote, payment_method, notes=''):
     order.order_number = f'RO{order.pk:06d}'
     order.save(update_fields=['order_number'])
 
-    RestaurantOrderItem.objects.bulk_create(
+    packaging_by_item = {line.item.pk: line.item.packaging_charge for line in lines}
+    order_items = RestaurantOrderItem.objects.bulk_create(
         [
             RestaurantOrderItem(
                 order=order,
-                menu_item=item,
-                name=item.name,
-                is_veg=item.is_veg,
-                unit_price=item.price,
-                quantity=qty,
-                line_total=item.price * qty,
-                packaging_charge=item.packaging_charge,
+                menu_item=line.item,
+                name=line.item.name,
+                is_veg=line.item.is_veg,
+                unit_price=line.item.price,
+                quantity=line.quantity,
+                line_total=line.item.price * line.quantity + line.addon_total,
+                packaging_charge=packaging_by_item.pop(line.item.pk, Decimal('0')),
             )
-            for item, qty in lines
+            for line in lines
         ]
     )
+    RestaurantOrderItemAddOn.objects.bulk_create([
+        RestaurantOrderItemAddOn(
+            order_item=order_item, group_name=option.group.name, name=option.name,
+            unit_price=option.price,
+        )
+        for order_item, line in zip(order_items, lines, strict=True)
+        for option in line.addons
+    ])
 
     if online:
         try:

@@ -231,6 +231,43 @@ class MenuItem(models.Model):
         return None
 
 
+class MenuItemAddOnGroup(models.Model):
+    menu_item = models.ForeignKey(MenuItem, on_delete=models.CASCADE, related_name='addon_groups')
+    name = models.CharField(max_length=80)
+    min_selections = models.PositiveSmallIntegerField(default=0)
+    max_selections = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(1)])
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order', 'id']
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(max_selections__gte=1, min_selections__lte=models.F('max_selections')),
+                name='restaurant_addon_group_valid_limits',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.menu_item} - {self.name}'
+
+
+class MenuItemAddOnOption(models.Model):
+    group = models.ForeignKey(MenuItemAddOnGroup, on_delete=models.CASCADE, related_name='options')
+    name = models.CharField(max_length=80)
+    price = models.DecimalField(
+        max_digits=8, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(0)],
+    )
+    is_available = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order', 'id']
+
+    def __str__(self):
+        return self.name
+
+
 class RestaurantOrder(models.Model):
     class Status(models.TextChoices):
         AWAITING_PAYMENT = 'awaiting_payment', 'Awaiting payment'
@@ -315,6 +352,16 @@ class RestaurantOrderItem(models.Model):
 
     def __str__(self):
         return f'{self.quantity} x {self.name}'
+
+
+class RestaurantOrderItemAddOn(models.Model):
+    order_item = models.ForeignKey(RestaurantOrderItem, on_delete=models.CASCADE, related_name='addons')
+    group_name = models.CharField(max_length=80)
+    name = models.CharField(max_length=80)
+    unit_price = models.DecimalField(max_digits=8, decimal_places=2)
+
+    class Meta:
+        ordering = ['id']
 
 
 class RestaurantDeliveryAssignment(models.Model):
