@@ -20,8 +20,32 @@ jobs:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
-          ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30 "$SERVER_USER@$SERVER_HOST" deploy
+          for setting in SERVER_HOST SERVER_USER SSH_KEY; do
+            if [[ -z "${!setting}" ]]; then
+              secret="$setting"
+              if [[ "$setting" == SSH_KEY ]]; then
+                secret=SERVER_SSH_KEY
+              fi
+              echo "::error::Configure the $secret GitHub Actions secret for this workflow."
+              exit 1
+            fi
+          done
+
+          umask 077
+          ssh_dir="$(mktemp -d "${RUNNER_TEMP}/deploy-ssh.XXXXXXXX")"
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$ssh_dir/deploy_key"
+          if ! ssh-keygen -y -P '' -f "$ssh_dir/deploy_key" >/dev/null 2>&1; then
+            echo "::error::SERVER_SSH_KEY must contain a complete, unencrypted SSH private key."
+            exit 1
+          fi
+
+          if ! ssh-keyscan -T 10 -H -- "$SERVER_HOST" > "$ssh_dir/known_hosts" || [[ ! -s "$ssh_dir/known_hosts" ]]; then
+            echo "::error::Could not retrieve the SSH host key. Check SERVER_HOST and whether port 22 is reachable from the GitHub Actions runner."
+            exit 1
+          fi
+
+          ssh -i "$ssh_dir/deploy_key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$ssh_dir/known_hosts" -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 "$SERVER_USER@$SERVER_HOST" deploy
