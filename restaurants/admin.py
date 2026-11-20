@@ -12,6 +12,8 @@ from .models import (
     Cuisine,
     MenuCategory,
     MenuItem,
+    MenuItemAddOnGroup,
+    MenuItemAddOnOption,
     Restaurant,
     RestaurantOrder,
     RestaurantOrderItem,
@@ -40,7 +42,45 @@ class CuisineAdmin(admin.ModelAdmin):
 class MenuItemInline(admin.TabularInline):
     model = MenuItem
     extra = 0
+    show_change_link = True
     fields = ['name', 'category', 'is_veg', 'price', 'mrp', 'is_available']
+
+
+class MenuItemAddOnGroupInline(admin.TabularInline):
+    model = MenuItemAddOnGroup
+    extra = 0
+    show_change_link = True
+
+
+class MenuItemAddOnOptionInline(admin.TabularInline):
+    model = MenuItemAddOnOption
+    extra = 0
+
+
+@admin.register(MenuItem)
+class MenuItemAdmin(admin.ModelAdmin):
+    list_display = ['name', 'restaurant', 'category', 'price', 'is_available']
+    list_filter = ['restaurant', 'is_available']
+    inlines = [MenuItemAddOnGroupInline]
+
+    readonly_fields = ['restaurant']
+
+    def has_add_permission(self, request):
+        return False  # Dishes are created on the restaurant's change page.
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj and 'category' in form.base_fields:
+            form.base_fields['category'].queryset = obj.restaurant.categories.all()
+        return form
+
+
+@admin.register(MenuItemAddOnGroup)
+class MenuItemAddOnGroupAdmin(admin.ModelAdmin):
+    inlines = [MenuItemAddOnOptionInline]
+
+    def get_readonly_fields(self, request, obj=None):
+        return ('menu_item',) if obj else ()
 
 
 @admin.register(Restaurant)
@@ -134,7 +174,19 @@ class OrderItemInline(admin.TabularInline):
     model = RestaurantOrderItem
     extra = 0
     can_delete = False
-    readonly_fields = ['menu_item', 'name', 'is_veg', 'unit_price', 'quantity', 'line_total']
+    readonly_fields = ['menu_item', 'name', 'is_veg', 'unit_price', 'quantity', 'selected_addons', 'line_total']
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related('addons')
+
+    @admin.display(description='Add-ons per dish')
+    def selected_addons(self, item):
+        if not item.pk:
+            return ''
+        return ', '.join(
+            f'{addon.group_name}: {addon.name} (+{addon.unit_price:.2f})'
+            for addon in item.addons.all()
+        )
 
 
 @admin.register(RestaurantOrder)

@@ -6,6 +6,16 @@ from . import payment_admin, views
 router = SimpleRouter()
 router.register(r'partner/categories', views.PartnerCategoryViewSet, basename='partner-category')
 router.register(r'partner/items', views.PartnerItemViewSet, basename='partner-item')
+router.register(
+    r'partner/items/(?P<item_pk>\d+)/addon-groups',
+    views.PartnerAddOnGroupViewSet,
+    basename='partner-addon-group',
+)
+router.register(
+    r'partner/items/(?P<item_pk>\d+)/addon-groups/(?P<group_pk>\d+)/options',
+    views.PartnerAddOnOptionViewSet,
+    basename='partner-addon-option',
+)
 router.register(r'partner/orders', views.PartnerOrderViewSet, basename='partner-order')
 router.register(r'admin/cuisines', views.AdminCuisineViewSet, basename='admin-cuisine')
 router.register(

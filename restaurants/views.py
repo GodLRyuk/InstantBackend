@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.shortcuts import get_object_or_404
 from decimal import Decimal
 import hmac
@@ -20,6 +20,7 @@ from .models import (
     Cuisine,
     MenuCategory,
     MenuItem,
+    MenuItemAddOnGroup,
     Restaurant,
     RestaurantDeliveryAssignment,
     RestaurantOrder,
@@ -34,6 +35,8 @@ from .serializers import (
     CuisineSerializer,
     DeliveryChargeSerializer,
     MenuCategorySerializer,
+    MenuItemAddOnGroupSerializer,
+    MenuItemAddOnOptionSerializer,
     MenuItemSerializer,
     OrderSerializer,
     PartnerMenuItemSerializer,
@@ -195,6 +198,8 @@ class RestaurantViewSet(mixins.UpdateModelMixin, viewsets.ReadOnlyModelViewSet):
         restaurant = self.get_object()
         items = restaurant.items.select_related('category').order_by(
             'category__sort_order', 'sort_order', 'name'
+        ).prefetch_related(
+            Prefetch('addon_groups', queryset=services.available_addon_groups()),
         )
         return Response(MenuItemSerializer(items, many=True, context={'request': request}).data)
 
@@ -220,7 +225,7 @@ class CustomerOrderViewSet(
         return (
             RestaurantOrder.objects.filter(customer=self.request.user)
             .select_related('restaurant')
-            .prefetch_related('items')
+            .prefetch_related('items__addons')
         )
 
     @action(detail=False, methods=['post'])
@@ -693,6 +698,39 @@ class PartnerItemViewSet(PartnerBaseMixin, PartnerBulkMenuMixin, viewsets.ModelV
         return Response(self.get_serializer(item).data)
 
 
+class PartnerAddOnGroupViewSet(PartnerBaseMixin, viewsets.ModelViewSet):
+    serializer_class = MenuItemAddOnGroupSerializer
+    lookup_value_regex = r'\d+'
+
+    def get_menu_item(self):
+        return get_object_or_404(self.restaurant.items, pk=self.kwargs['item_pk'])
+
+    def get_queryset(self):
+        return self.get_menu_item().addon_groups.prefetch_related('options')
+
+    def perform_create(self, serializer):
+        serializer.save(menu_item=self.get_menu_item())
+
+
+class PartnerAddOnOptionViewSet(PartnerBaseMixin, viewsets.ModelViewSet):
+    serializer_class = MenuItemAddOnOptionSerializer
+    lookup_value_regex = r'\d+'
+
+    def get_group(self):
+        return get_object_or_404(
+            MenuItemAddOnGroup,
+            menu_item__restaurant=self.restaurant,
+            menu_item_id=self.kwargs['item_pk'],
+            pk=self.kwargs['group_pk'],
+        )
+
+    def get_queryset(self):
+        return self.get_group().options.all()
+
+    def perform_create(self, serializer):
+        serializer.save(group=self.get_group())
+
+
 class OrderFilterMixin:
     def filter_orders(self, qs):
         p = self.request.query_params
@@ -714,7 +752,7 @@ class PartnerOrderViewSet(PartnerBaseMixin, OrderFilterMixin, viewsets.ReadOnlyM
             RestaurantOrder.objects.filter(restaurant=self.restaurant)
             .exclude(status=S.AWAITING_PAYMENT)
             .select_related('restaurant')
-            .prefetch_related('items')
+            .prefetch_related('items__addons')
         )
         return self.filter_orders(qs)
 
@@ -920,7 +958,7 @@ class AdminOrderViewSet(OrderFilterMixin, viewsets.ReadOnlyModelViewSet):
     pagination_class = None
 
     def get_queryset(self):
-        qs = RestaurantOrder.objects.select_related('restaurant').prefetch_related('items')
+        qs = RestaurantOrder.objects.select_related('restaurant').prefetch_related('items__addons')
         restaurant = self.request.query_params.get('restaurant')
         if restaurant and restaurant.isdigit():
             qs = qs.filter(restaurant_id=int(restaurant))

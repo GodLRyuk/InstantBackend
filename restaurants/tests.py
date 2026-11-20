@@ -18,6 +18,7 @@ from PIL import Image
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from addresses.models import Address
 from orders.routing import websocket_urlpatterns
 from .models import MenuItem, Restaurant, RestaurantDeliveryAssignment, RestaurantOrder
 from . import services
@@ -422,6 +423,116 @@ class RestaurantMenuAPITests(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+class RestaurantAddOnAPITests(TestCase):
+    def setUp(self):
+        users = get_user_model()
+        self.owner = users.objects.create_user(
+            username='addons-owner', phone='9876567001', role='RESTAURANT',
+        )
+        self.customer = users.objects.create_user(
+            username='addons-customer', phone='9876567002', role='CUSTOMER',
+        )
+        self.restaurant = Restaurant.objects.create(
+            owner=self.owner, name='Add-On Restaurant', status=Restaurant.Status.APPROVED,
+            opens_at=time(0), closes_at=time(0),
+        )
+        self.item = self.restaurant.items.create(name='Burger', price=180, packaging_charge=5)
+        self.group_url = f'/api/restaurants/partner/items/{self.item.pk}/addon-groups/'
+        self.orders_url = '/api/restaurants/orders/'
+        self.client = APIClient()
+
+    def test_partner_configures_addons_and_checkout_saves_each_variant(self):
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post(self.group_url, {'name': 'Extras', 'max_selections': 2})
+        self.assertEqual(response.status_code, 201, response.data)
+        options_url = f'{self.group_url}{response.data["id"]}/options/'
+        response = self.client.post(options_url, {'name': 'Cheese', 'price': '30.00'})
+        self.assertEqual(response.status_code, 201, response.data)
+        cheese_id = response.data['id']
+        response = self.client.post(options_url, {'name': 'Sauce', 'is_available': False})
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(len(self.client.get(self.group_url).data[0]['options']), 2)
+
+        address = Address.objects.create(user=self.customer, full_address='1 Main Road')
+        self.client.force_authenticate(user=self.customer)
+        menu = self.client.get(f'/api/restaurants/{self.restaurant.pk}/menu/')
+        self.assertEqual(menu.status_code, 200, menu.data)
+        self.assertEqual([opt['id'] for opt in menu.data[0]['addon_groups'][0]['options']], [cheese_id])
+        cart = {
+            'restaurant_id': self.restaurant.pk,
+            'address_id': address.pk,
+            'items': [
+                {'menu_item_id': self.item.pk, 'quantity': 2, 'addon_option_ids': [cheese_id]},
+                {'menu_item_id': self.item.pk, 'quantity': 1},
+            ],
+        }
+        quote = self.client.post(f'{self.orders_url}quote/', cart, format='json')
+        self.assertEqual(quote.status_code, 200, quote.data)
+        self.assertEqual(quote.data['item_total'], '600.00')
+        self.assertEqual(quote.data['packaging_charge'], '5.00')
+        self.assertEqual(quote.data['total_amount'], '660.00')
+        with patch('restaurants.services.cashfree.create_order', return_value={
+            'order_id': 'test-order', 'payment_session_id': 'test-session',
+        }) as cashfree_order:
+            online = self.client.post(self.orders_url, {
+                **cart, 'payment_method': RestaurantOrder.PaymentMethod.ONLINE,
+            }, format='json')
+        self.assertEqual(online.status_code, 201, online.data)
+        self.assertEqual(cashfree_order.call_args.kwargs['amount'], Decimal('660.00'))
+
+        placed = self.client.post(self.orders_url, {
+            **cart, 'payment_method': RestaurantOrder.PaymentMethod.COD,
+        }, format='json')
+        self.assertEqual(placed.status_code, 201, placed.data)
+        self.assertEqual(placed.data['total_amount'], quote.data['total_amount'])
+        lines = {line['quantity']: line for line in placed.data['items']}
+        self.assertEqual(lines[2]['line_total'], '420.00')
+        self.assertEqual(lines[1]['addons'], [])
+        expected = [{'group_name': 'Extras', 'name': 'Cheese', 'unit_price': '30.00'}]
+        self.assertEqual(lines[2]['addons'], expected)
+
+        self.client.force_authenticate(user=self.owner)
+        self.assertEqual(self.client.delete(f'{options_url}{cheese_id}/').status_code, 204)
+        partner_order = self.client.get(f'/api/restaurants/partner/orders/{placed.data["id"]}/')
+        self.assertEqual(partner_order.status_code, 200)
+        lines = {line['quantity']: line for line in partner_order.data['items']}
+        self.assertEqual(lines[2]['addons'], expected)
+
+    def test_addon_management_and_checkout_validate_scope_and_limits(self):
+        another_owner = get_user_model().objects.create_user(
+            username='addons-other-owner', phone='9876567003', role='RESTAURANT',
+        )
+        another_restaurant = Restaurant.objects.create(owner=another_owner, name='Other Restaurant')
+        another_item = another_restaurant.items.create(name='Other Burger', price=150)
+        foreign_group = another_item.addon_groups.create(name='Extras')
+        foreign_option = foreign_group.options.create(name='Cheese')
+        group = self.item.addon_groups.create(name='Sauce', min_selections=1, max_selections=1)
+        mayo = group.options.create(name='Mayo')
+        mustard = group.options.create(name='Mustard')
+        unavailable = group.options.create(name='Ketchup', is_available=False)
+
+        self.client.force_authenticate(user=self.owner)
+        self.assertEqual(
+            self.client.get(f'/api/restaurants/partner/items/{another_item.pk}/addon-groups/').status_code,
+            404,
+        )
+        foreign_options_url = f'{self.group_url}{foreign_group.pk}/options/'
+        self.assertEqual(self.client.post(foreign_options_url, {'name': 'Other'}).status_code, 404)
+        self.assertEqual(self.client.patch(
+            f'{self.group_url}{group.pk}/', {'min_selections': 2},
+        ).status_code, 400)
+
+        self.client.force_authenticate(user=self.customer)
+        for ids in ([], [mayo.pk, mustard.pk], [mayo.pk, mayo.pk], [mayo.pk, foreign_option.pk],
+                    [unavailable.pk]):
+            with self.subTest(option_ids=ids):
+                response = self.client.post(f'{self.orders_url}quote/', {
+                    'restaurant_id': self.restaurant.pk,
+                    'items': [{'menu_item_id': self.item.pk, 'quantity': 1, 'addon_option_ids': ids}],
+                }, format='json')
+                self.assertEqual(response.status_code, 400, response.data)
+
+
 class PartnerRestaurantAPITests(TestCase):
     def setUp(self):
         user_model = get_user_model()
@@ -599,7 +710,7 @@ class RestaurantOrderDispatchTests(TestCase):
         )
         quote = {
             'restaurant': self.restaurant,
-            'lines': [(menu_item, 1)],
+            'lines': [services.PricedMenuLine(menu_item, 1)],
             'bill': SimpleNamespace(
                 item_total=Decimal('100.00'),
                 discount=Decimal('0.00'),

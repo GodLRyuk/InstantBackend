@@ -4,9 +4,12 @@ from .models import (
     Cuisine,
     MenuCategory,
     MenuItem,
+    MenuItemAddOnGroup,
+    MenuItemAddOnOption,
     Restaurant,
     RestaurantOrder,
     RestaurantOrderItem,
+    RestaurantOrderItemAddOn,
 )
 from .utils import fmt_time
 
@@ -87,6 +90,30 @@ class RestaurantDetailSerializer(RestaurantListSerializer):
         return absolute_url(self.context.get('request'), obj.logo)
 
 
+class MenuItemAddOnOptionSerializer(serializers.ModelSerializer):
+    is_available = serializers.BooleanField(default=True)
+
+    class Meta:
+        model = MenuItemAddOnOption
+        fields = ['id', 'name', 'price', 'is_available', 'sort_order']
+
+
+class MenuItemAddOnGroupSerializer(serializers.ModelSerializer):
+    is_active = serializers.BooleanField(default=True)
+    options = MenuItemAddOnOptionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = MenuItemAddOnGroup
+        fields = ['id', 'name', 'min_selections', 'max_selections', 'is_active', 'sort_order', 'options']
+
+    def validate(self, attrs):
+        minimum = attrs.get('min_selections', getattr(self.instance, 'min_selections', 0))
+        maximum = attrs.get('max_selections', getattr(self.instance, 'max_selections', 1))
+        if minimum > maximum:
+            raise serializers.ValidationError({'min_selections': 'Must be at most max_selections.'})
+        return attrs
+
+
 class MenuItemSerializer(serializers.ModelSerializer):
     """Keys match MenuItem.fromJson in the Flutter app."""
 
@@ -94,12 +121,13 @@ class MenuItemSerializer(serializers.ModelSerializer):
     category = serializers.SerializerMethodField()
     image = serializers.SerializerMethodField()
     discount_percent = serializers.IntegerField(read_only=True)
+    addon_groups = MenuItemAddOnGroupSerializer(many=True, read_only=True)
 
     class Meta:
         model = MenuItem
         fields = [
             'id', 'restaurant', 'name', 'description', 'category', 'is_veg', 'price', 'mrp',
-            'image', 'is_available', 'packaging_charge', 'discount_percent',
+            'image', 'is_available', 'packaging_charge', 'discount_percent', 'addon_groups',
         ]
 
     def get_category(self, obj):
@@ -113,6 +141,9 @@ class MenuItemSerializer(serializers.ModelSerializer):
 class OrderLineInputSerializer(serializers.Serializer):
     menu_item_id = serializers.IntegerField()
     quantity = serializers.IntegerField(min_value=1, max_value=20)
+    addon_option_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False,
+    )
 
 
 class QuoteSerializer(serializers.Serializer):
@@ -142,10 +173,18 @@ class StatusChangeSerializer(serializers.Serializer):
     reason = serializers.CharField(required=False, allow_blank=True, max_length=255)
 
 
+class OrderItemAddOnSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RestaurantOrderItemAddOn
+        fields = ['group_name', 'name', 'unit_price']
+
+
 class OrderItemSerializer(serializers.ModelSerializer):
+    addons = OrderItemAddOnSerializer(many=True, read_only=True)
+
     class Meta:
         model = RestaurantOrderItem
-        fields = ['id', 'menu_item', 'name', 'is_veg', 'unit_price', 'quantity', 'line_total']
+        fields = ['id', 'menu_item', 'name', 'is_veg', 'unit_price', 'quantity', 'line_total', 'addons']
 
 
 class OrderSerializer(serializers.ModelSerializer):
