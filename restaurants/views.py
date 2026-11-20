@@ -15,7 +15,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import services
+from . import menu_workbook, services
 from .models import (
     Cuisine,
     MenuCategory,
@@ -621,6 +621,21 @@ class PartnerBaseMixin:
         ctx = super().get_serializer_context()
         ctx['restaurant'] = self.restaurant
         return ctx
+
+
+class PartnerMenuWorkbookView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser]
+
+    def get(self, request):
+        restaurant = partner_restaurant(request)
+        return menu_workbook.export_menu(
+            restaurant, template=request.query_params.get('template') == '1',
+        )
+
+    def post(self, request):
+        restaurant = partner_restaurant(request)
+        return Response(menu_workbook.import_menu(restaurant, request.FILES.get('file')))
 
 
 class PartnerCategoryViewSet(PartnerBaseMixin, viewsets.ModelViewSet):
